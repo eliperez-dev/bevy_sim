@@ -1,9 +1,5 @@
 use bevy::{
-    color::palettes::css::WHITE,
-    mesh::{CuboidMeshBuilder, VertexAttributeValues},
-    pbr::wireframe::{NoWireframe, Wireframe, WireframeConfig, WireframePlugin},
-    prelude::*,
-    render::{RenderPlugin, settings::{WgpuFeatures, WgpuSettings}}
+    color::palettes::css::WHITE, light::CascadeShadowConfigBuilder, mesh::{CuboidMeshBuilder, VertexAttributeValues}, pbr::wireframe::{NoWireframe, Wireframe, WireframeConfig, WireframePlugin}, prelude::*, render::{RenderPlugin, settings::{WgpuFeatures, WgpuSettings}}
 };
 
 use noise::{NoiseFn, Perlin};
@@ -29,12 +25,12 @@ fn main() {
             // The global wireframe config enables drawing of wireframes on every mesh,
             // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
             // regardless of the global configuration.
-            global: true,
+            global: false,
             // Controls the default color of all wireframes. Used as the default color for global wireframes.
             // Can be changed per mesh using the `WireframeColor` component.
             default_color: WHITE.into(),
         })
-        .add_systems(Startup, (setup, modify_plane).chain())
+        .add_systems(Startup, (setup, modify_plane, setup_camera_fog, setup_instructions).chain())
         .add_systems(Update, camera_controls)
         .run();
 }
@@ -56,19 +52,33 @@ fn modify_plane(
                     // pos[1] = pos[0].sin() + pos[2].cos();
 
                     let base_layer = Perlin::new(0);
+                    let second_layer = Perlin::new(1);
                 
-                    let horizontal_scale = 0.008;
-                    let vertical_scale = 25.0;
+                    let base_horizontal_scale = 0.008;
+                    let base_vertical_scale = 25.0;
 
                     let height = base_layer
                         .get([
-                            (pos[0] * horizontal_scale) as f64,
-                            (pos[2] * horizontal_scale) as f64
-                        ]) as f32
-                    ;
-                    pos[1] = height * vertical_scale;
+                            (pos[0] * base_horizontal_scale) as f64,
+                            (pos[2] * base_horizontal_scale) as f64
+                        ]
+                    ) as f32 * base_vertical_scale;
+
+                    let second_horizontal_scale = 0.008;
+                    let second_vertical_scale = 5.0;
+
+                    let second_height = second_layer
+                        .get([
+                            (pos[0] * second_horizontal_scale) as f64,
+                            (pos[2] * second_horizontal_scale) as f64
+                        ]
+                    ) as f32 * second_vertical_scale;
+
+
+                    pos[1] = height + second_height ;
                 }
             }
+            mesh.compute_smooth_normals();
         }
     }
 }
@@ -79,17 +89,28 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let cascade_shadow_config = CascadeShadowConfigBuilder {
+        first_cascade_far_bound: 0.3,
+        maximum_distance: 50000.0,
+        ..default()
+    }
+    .build();
 
     // plane
     commands.spawn((
         Mesh3d(meshes.add(
         Plane3d::default().mesh()
         .size(500., 500.)
-        .subdivisions(100)
+        .subdivisions(50)
     )),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.3, 0.5, 0.3),
+            perceptual_roughness: 1.0, // 1.0 is fully matte, 0.0 is a mirror
+            reflectance: 0.1,          // Lowering this also reduces "specular" highlights
+            ..default()
+        })),
         Ground,
-        NoWireframe,
+        //Wireframe,
     ));
 
     // Ocean
@@ -113,17 +134,46 @@ fn setup(
         )
     );
     
-    // light
+    // Sun
     commands.spawn((
-        DirectionalLight::default(),
-        Transform::from_translation(Vec3::ONE).looking_at(Vec3::ZERO, Vec3::Y),
+        DirectionalLight {
+            color: Color::srgb(0.98, 0.95, 0.82),
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(-0.15, -0.05, 0.25), Vec3::Y),
+        cascade_shadow_config,
     ));
 
-    // camera
+
+}
+
+fn setup_camera_fog(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(15.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(-1.0, 0.1, 1.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+        DistanceFog {
+            color: Color::srgba(0.35, 0.48, 0.66, 1.0),
+            directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.5),
+            directional_light_exponent: 10.0,
+            falloff: FogFalloff::from_visibility_colors(
+                5_000.0, // distance in world units up to which objects retain visibility (>= 5% contrast)
+                Color::srgb(0.35, 0.5, 0.66), // atmospheric extinction color (after light is lost due to absorption by atmospheric particles)
+                Color::srgb(0.8, 0.844, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
+            ),
+        },
     ));
+}
+
+fn setup_instructions(mut commands: Commands) {
+    commands.spawn((Text::new("Press Spacebar to Toggle Atmospheric Fog.\nPress S to Toggle Directional Light Fog Influence."),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: px(12),
+            left: px(12),
+            ..default()
+        })
+    );
 }
 
 
