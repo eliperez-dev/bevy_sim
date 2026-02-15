@@ -5,6 +5,14 @@ use bevy::{
 use noise::{NoiseFn, Perlin};
 
 
+
+const MAP_SIZE: f32 = 1000.0;
+const MAP_HEIGHT_SCALE: f32 = 100.0;
+
+const LIGHTING_BOUNDS: f32 = 1000.0;
+const FOG_DISTANCE: f32 = 50.0;
+
+
 fn main() {
     App::new()
         .add_plugins((
@@ -30,16 +38,71 @@ fn main() {
             // Can be changed per mesh using the `WireframeColor` component.
             default_color: WHITE.into(),
         })
-        .add_systems(Startup, (setup, modify_plane, setup_camera_fog, setup_instructions).chain())
-        .add_systems(Update, camera_controls)
+        .add_systems(Startup, (setup, modify_plane, setup_camera_fog, update_debugger).chain())
+        .add_systems(Update, (camera_controls, update_debugger))
         .run();
 }
 
+struct WorldGenerator {
+    perlin_layers: Vec<PerlinLayer>,
+}
+
+impl WorldGenerator {
+    pub fn new() -> Self {
+        Self {
+            perlin_layers: vec![],
+        }
+    }
+
+    pub fn add_layer(&mut self, layer: PerlinLayer) {
+        self.perlin_layers.push(layer);
+    }
+}
+
+impl Default for WorldGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct PerlinLayer {
+    perlin: Perlin,
+    horizontal_scale: f32,
+    vertical_scale: f32,
+}
+
+impl PerlinLayer {
+    pub fn new(seed: u32, horizontal_scale: f32, vertical_scale: f32) -> Self {
+        Self {
+            perlin: Perlin::new(seed),
+            horizontal_scale,
+            vertical_scale: vertical_scale.max(-1.0).min(1.0),
+        }
+    }
+
+    pub fn get_level(&self, pos: &mut [f32;3]) -> f32{
+        let height = self.perlin
+            .get([
+                (pos[0] * self.horizontal_scale / MAP_SIZE) as f64,
+                (pos[2] * self.horizontal_scale / MAP_SIZE) as f64
+            ]
+        ) as f32;
+        height * self.vertical_scale
+    }
+
+
+}
 
 fn modify_plane(
     query: Query<&Mesh3d, With<Ground>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
+
+    let mut world_generator = WorldGenerator::new();
+
+    world_generator.add_layer(PerlinLayer::new(0, 1.0, 1.0));
+    //world_generator.add_layer(PerlinLayer::new(1, 1.0, 1.0));
+
     for mesh_handle in &query {
         // Get a mutable reference to the mesh asset
         if let Some(mesh) = meshes.get_mut(mesh_handle) {
@@ -51,31 +114,13 @@ fn modify_plane(
                     // // Waves
                     // pos[1] = pos[0].sin() + pos[2].cos();
 
-                    let base_layer = Perlin::new(0);
-                    let second_layer = Perlin::new(1);
-                
-                    let base_horizontal_scale = 0.008;
-                    let base_vertical_scale = 25.0;
+                    let mut height = 0.0;
 
-                    let height = base_layer
-                        .get([
-                            (pos[0] * base_horizontal_scale) as f64,
-                            (pos[2] * base_horizontal_scale) as f64
-                        ]
-                    ) as f32 * base_vertical_scale;
+                    for layer in &world_generator.perlin_layers {
+                        height += layer.get_level(pos)
+                    }
 
-                    let second_horizontal_scale = 0.008;
-                    let second_vertical_scale = 5.0;
-
-                    let second_height = second_layer
-                        .get([
-                            (pos[0] * second_horizontal_scale) as f64,
-                            (pos[2] * second_horizontal_scale) as f64
-                        ]
-                    ) as f32 * second_vertical_scale;
-
-
-                    pos[1] = height + second_height ;
+                    pos[1] = height * MAP_HEIGHT_SCALE;
                 }
             }
             mesh.compute_smooth_normals();
@@ -90,8 +135,8 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let cascade_shadow_config = CascadeShadowConfigBuilder {
-        first_cascade_far_bound: 0.3,
-        maximum_distance: 50000.0,
+        first_cascade_far_bound: MAP_SIZE/50.0,
+        maximum_distance: LIGHTING_BOUNDS,
         ..default()
     }
     .build();
@@ -100,8 +145,8 @@ fn setup(
     commands.spawn((
         Mesh3d(meshes.add(
         Plane3d::default().mesh()
-        .size(500., 500.)
-        .subdivisions(50)
+        .size(MAP_SIZE, MAP_SIZE)
+        .subdivisions(MAP_SIZE as u32 / 10)
     )),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.3, 0.5, 0.3),
@@ -117,7 +162,7 @@ fn setup(
     commands.spawn((
         Mesh3d(meshes.add(
         Plane3d::default().mesh()
-        .size(500., 500.)
+        .size(MAP_SIZE, MAP_SIZE)
     )),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.3, 0.5))),
         NoWireframe,
@@ -126,9 +171,9 @@ fn setup(
 
     // testbox
     commands.spawn( (
-        Mesh3d(meshes.add(CuboidMeshBuilder::default())),
+        Mesh3d(meshes.add(dbg!(CuboidMeshBuilder::default()))),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.3, 0.5))),
-        Transform::from_xyz(0.0, 3.0, 0.0),
+        Transform::from_xyz(0.0, 35.0, 0.0),
         TestBox,
         Wireframe,
         )
@@ -146,18 +191,29 @@ fn setup(
     ));
 
 
+    commands.spawn((Text::new("Pos: N/A" ),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: px(12),
+            left: px(12),
+            ..default()
+        },
+        Debugger
+    ));
+
+
 }
 
 fn setup_camera_fog(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(-1.0, 0.1, 1.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+        Transform::from_xyz(-50.0, 50.0, 50.0).looking_at(Vec3::new(0.0, 20.0, 0.0), Vec3::Y),
         DistanceFog {
             color: Color::srgba(0.35, 0.48, 0.66, 1.0),
             directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.5),
             directional_light_exponent: 10.0,
             falloff: FogFalloff::from_visibility_colors(
-                5_000.0, // distance in world units up to which objects retain visibility (>= 5% contrast)
+                FOG_DISTANCE * 50.0, // distance in world units up to which objects retain visibility (>= 5% contrast)
                 Color::srgb(0.35, 0.5, 0.66), // atmospheric extinction color (after light is lost due to absorption by atmospheric particles)
                 Color::srgb(0.8, 0.844, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
             ),
@@ -165,15 +221,16 @@ fn setup_camera_fog(mut commands: Commands) {
     ));
 }
 
-fn setup_instructions(mut commands: Commands) {
-    commands.spawn((Text::new("Press Spacebar to Toggle Atmospheric Fog.\nPress S to Toggle Directional Light Fog Influence."),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: px(12),
-            left: px(12),
-            ..default()
-        })
-    );
+#[derive(Component)]
+struct Debugger;
+
+fn update_debugger(
+    camera: Query<&Transform, With<Camera>>,
+    mut debugger: Query<&mut Text, With<Debugger>>,
+
+) {
+    let mut message = debugger.single_mut().unwrap();
+    message.0 = format!("Position: {:?}", camera.single().unwrap().translation);
 }
 
 
