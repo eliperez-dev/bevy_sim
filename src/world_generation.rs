@@ -114,24 +114,22 @@ impl PerlinLayer {
 }
 
 fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
-    // 1. Define the extreme bounds for our biomes
+    // Define the extreme bounds for our biomes
     let desert_mult = 0.15;  // Very flat dunes
     let grass_mult = 0.5;    // Gentle rolling hills
     let forest_mult = 0.75;   // Steeper, uneven terrain
     let taiga_mult = 1.33;    // High, jagged mountains
 
-    // 2. Blend along the humidity axis (dry -> wet)
+    // Blend along the humidity axis (dry -> wet)
     // Lerp formula: start + (end - start) * percent
     let cold_blend = grass_mult + (taiga_mult - grass_mult) * humidity;
     let hot_blend = desert_mult + (forest_mult - desert_mult) * humidity;
 
-    // 3. Blend along the temperature axis (cold -> hot)
-    
+    // Blend along the temperature axis (cold -> hot)
 
     cold_blend + (hot_blend - cold_blend) * temp
 }
 
-// Notice the Added<Chunk> at the end of the query!
 pub fn modify_plane(
     query: Query<(&Mesh3d, &Transform), Added<Chunk>>,
     world_generator: Res<WorldGenerator>,
@@ -148,7 +146,7 @@ pub fn modify_plane(
                 colors.reserve(positions.len());
 
                 for pos in positions.iter_mut() {
-                    // 1. Get world position by adding the chunk's transform
+                    // Get world position by adding the chunk's transform
                     let world_pos = [
                         pos[0] + transform.translation.x,
                         pos[1] + transform.translation.y,
@@ -157,7 +155,7 @@ pub fn modify_plane(
 
                     let mut base_height = 0.0;
                     
-                    // 2. Sample noise using the WORLD position
+                    // Sample noise using the WORLD position
                     let (temp, humidity) = world_generator.get_climate(&world_pos);
 
                     for layer in &world_generator.terrain_layers {
@@ -169,7 +167,7 @@ pub fn modify_plane(
 
                     colors.push(get_terrain_color(final_height, temp, humidity));
 
-                    // 3. Update the visual local mesh position
+                    // Update the visual local mesh position
                     pos[1] = final_height * MAP_HEIGHT_SCALE;
                 }
             }
@@ -201,8 +199,8 @@ pub fn generate_chunks(
 ) {
     let cam_transform = camera.single().unwrap().translation;
     
-    let cam_x = (cam_transform.x / MAP_SIZE).round() as i32;
-    let cam_z = (cam_transform.z / MAP_SIZE).round() as i32;
+    let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
+    let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
     // Use a squared radius for faster comparison
     let render_distance_sq = (RENDER_DISTANCE as f32).powi(2);
@@ -218,16 +216,16 @@ pub fn generate_chunks(
             // Only proceed if within the circular radius
             if distance_sq <= render_distance_sq {
                 if chunk_manager.spawned_chunks.insert((x, z)) {
-                    let x_pos = x as f32 * MAP_SIZE;
-                    let z_pos = z as f32 * MAP_SIZE;
+                    let x_pos = x as f32 * CHUNK_SIZE;
+                    let z_pos = z as f32 * CHUNK_SIZE;
                     
                     
 
                     commands.spawn((
                         Mesh3d(meshes.add(
                             Plane3d::default().mesh()
-                            .size(MAP_SIZE, MAP_SIZE)
-                            .subdivisions((MAP_SIZE * TERRAIN_QUALITY) as u32)
+                            .size(CHUNK_SIZE, CHUNK_SIZE)
+                            .subdivisions((CHUNK_SIZE * TERRAIN_QUALITY) as u32)
                         )),
                         MeshMaterial3d(materials.add(StandardMaterial {
                             base_color: Color::WHITE,
@@ -237,7 +235,7 @@ pub fn generate_chunks(
                         Chunk { x, z },
                     )).with_children(|parent| {
                         parent.spawn((
-                            Mesh3d(meshes.add(Plane3d::default().mesh().size(MAP_SIZE, MAP_SIZE))),
+                            Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE))),
                             MeshMaterial3d(materials.add(StandardMaterial {
                                 base_color: Color::srgb(0.3, 0.3, 0.5),
                                 alpha_mode: AlphaMode::Blend,
@@ -260,8 +258,8 @@ pub fn despawn_out_of_bounds_chunks(
 ) {
     let cam_transform = camera.single().unwrap().translation;
     
-    let cam_x = (cam_transform.x / MAP_SIZE).round() as i32;
-    let cam_z = (cam_transform.z / MAP_SIZE).round() as i32;
+    let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
+    let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
     // Use a squared radius for despawning as well
     let despawn_distance_sq = (DESPAWN_DISTANCE as f32).powi(2);

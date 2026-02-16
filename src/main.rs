@@ -55,7 +55,6 @@ fn main() {
                     },
                 },
             },
-
         ))
         // Wireframes can be configured with this resource. This can be changed at runtime.
         .insert_resource(WireframeConfig {
@@ -171,6 +170,9 @@ fn camera_controls(
     let panning_delta = rotation_speed * time.delta_secs();
 
     if keyboard.pressed(KeyCode::ShiftLeft) {
+        pan_speed *= 15.00;
+    }
+    if keyboard.pressed(KeyCode::Tab) {
         pan_speed *= 15.00;
     }
 
