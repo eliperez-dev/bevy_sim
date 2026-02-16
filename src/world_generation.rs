@@ -244,7 +244,7 @@ pub fn generate_chunks(
                         Mesh3d(meshes.add(
                             Plane3d::default().mesh()
                             .size(CHUNK_SIZE, CHUNK_SIZE)
-                            .subdivisions((CHUNK_SIZE / TERRAIN_QUALITY) as u32)
+                            .subdivisions((TERRAIN_QUALITY) as u32)
                         )),
                         MeshMaterial3d(materials.add(StandardMaterial {
                             base_color: Color::WHITE,

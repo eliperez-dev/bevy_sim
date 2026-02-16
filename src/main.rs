@@ -1,5 +1,6 @@
 use bevy::{
     color::palettes::css::WHITE,
+    core_pipeline::Skybox,
     light::CascadeShadowConfigBuilder,
     mesh::CuboidMeshBuilder,
     pbr::wireframe::{WireframeConfig, WireframePlugin},
@@ -114,7 +115,7 @@ fn setup(
     ));
 }
 
-fn setup_camera_fog(mut commands: Commands) {
+fn setup_camera_fog(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-50.0, 100.0, 50.0).looking_at(Vec3::new(0.0, 80.0, 0.0), Vec3::Y),
@@ -127,6 +128,11 @@ fn setup_camera_fog(mut commands: Commands) {
                 Color::srgb(0.35, 0.5, 0.66), // atmospheric extinction color
                 Color::srgb(0.8, 0.844, 1.0), // atmospheric inscattering color
             ),
+        },
+        Skybox {
+            image: asset_server.load("skybox.ktx2"),
+            brightness: 1000.0,
+            ..Default::default()
         },
     ));
 }
