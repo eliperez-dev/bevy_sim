@@ -4,13 +4,14 @@ use bevy::{
 
 use noise::{NoiseFn, Perlin};
 
-
-
-const MAP_SIZE: f32 = 1000.0;
+// You can now safely lower this size for performance, 
+// and use `map_offset` below to explore the world!
+const MAP_SIZE: f32 = 10000.0; 
+const TERRAIN_QUALITY: f32 = 0.025;
 const MAP_HEIGHT_SCALE: f32 = 100.0;
 
-const LIGHTING_BOUNDS: f32 = 1000.0;
-const FOG_DISTANCE: f32 = 50.0;
+const LIGHTING_BOUNDS: f32 = 5000.0;
+const FOG_DISTANCE: f32 = 800.0;
 
 
 fn main() {
@@ -30,12 +31,7 @@ fn main() {
         ))
         // Wireframes can be configured with this resource. This can be changed at runtime.
         .insert_resource(WireframeConfig {
-            // The global wireframe config enables drawing of wireframes on every mesh,
-            // except those with `NoWireframe`. Meshes with `Wireframe` will always have a wireframe,
-            // regardless of the global configuration.
             global: false,
-            // Controls the default color of all wireframes. Used as the default color for global wireframes.
-            // Can be changed per mesh using the `WireframeColor` component.
             default_color: WHITE.into(),
         })
         .add_systems(Startup, (setup, modify_plane, setup_camera_fog, update_debugger).chain())
@@ -69,60 +65,85 @@ struct PerlinLayer {
     perlin: Perlin,
     horizontal_scale: f32,
     vertical_scale: f32,
+    offset: [f32; 2],
 }
 
 impl PerlinLayer {
-    pub fn new(seed: u32, horizontal_scale: f32, vertical_scale: f32) -> Self {
+    pub fn new(seed: u32, horizontal_scale: f32, vertical_scale: f32, offset: [f32; 2]) -> Self {
         Self {
             perlin: Perlin::new(seed),
             horizontal_scale,
-            vertical_scale: vertical_scale.max(-1.0).min(1.0),
+            vertical_scale,
+            offset,
         }
     }
 
-    pub fn get_level(&self, pos: &mut [f32;3]) -> f32{
+    pub fn get_level(&self, pos: &[f32; 3]) -> f32 {
         let height = self.perlin
             .get([
-                (pos[0] * self.horizontal_scale / MAP_SIZE) as f64,
-                (pos[2] * self.horizontal_scale / MAP_SIZE) as f64
+                ((pos[0] + self.offset[0]) * self.horizontal_scale / 1000.0) as f64,
+                ((pos[2] + self.offset[1]) * self.horizontal_scale / 1000.0) as f64
             ]
         ) as f32;
         height * self.vertical_scale
     }
-
-
 }
 
 fn modify_plane(
     query: Query<&Mesh3d, With<Ground>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-
     let mut world_generator = WorldGenerator::new();
 
-    world_generator.add_layer(PerlinLayer::new(0, 1.0, 1.0));
-    //world_generator.add_layer(PerlinLayer::new(1, 1.0, 1.0));
+    // Change these values to "pan" around the infinite noise map
+    let map_offset = [0.0, 0.0]; 
+
+    world_generator.add_layer(PerlinLayer::new(0, 2.0, 0.25, map_offset));
+    world_generator.add_layer(PerlinLayer::new(1, 1.5, 0.5, map_offset));
+    world_generator.add_layer(PerlinLayer::new(2, 1.0, 1.0, map_offset));
+    world_generator.add_layer(PerlinLayer::new(3, 0.3, 3.5, map_offset));
 
     for mesh_handle in &query {
         // Get a mutable reference to the mesh asset
         if let Some(mesh) = meshes.get_mut(mesh_handle) {
+            
+            let mut colors: Vec<[f32; 4]> = Vec::new();
+
             // Access the position attribute mutably
             if let Some(VertexAttributeValues::Float32x3(positions)) = 
                 mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) 
             {
-                for pos in positions.iter_mut() {
-                    // // Waves
-                    // pos[1] = pos[0].sin() + pos[2].cos();
+                // Pre-allocate for performance
+                colors.reserve(positions.len());
 
+                for pos in positions.iter_mut() {
                     let mut height = 0.0;
 
                     for layer in &world_generator.perlin_layers {
                         height += layer.get_level(pos)
                     }
 
+                    // Assign colors based on the raw noise height before it gets scaled
+                    let color = if height > 2.0 {
+                        Color::WHITE // Snow
+                    } else if height > 1.0 {
+                        Color::srgb(0.5, 0.5, 0.5) // Rock
+                    } else if height > 0.02 {
+                        Color::srgb(0.2, 0.5, 0.2) // Grass
+                    } else if height > -0.05 {
+                        Color::srgb(0.8, 0.7, 0.5) // Sand
+                    } else {
+                        Color::srgb(0.3, 0.2, 0.1) // Deep dirt/underwater
+                    };
+
+                    colors.push(color.to_linear().to_f32_array());
+
+                    // Scale the visual mesh up
                     pos[1] = height * MAP_HEIGHT_SCALE;
                 }
             }
+            
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
             mesh.compute_smooth_normals();
         }
     }
@@ -135,7 +156,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let cascade_shadow_config = CascadeShadowConfigBuilder {
-        first_cascade_far_bound: MAP_SIZE/50.0,
+        first_cascade_far_bound: LIGHTING_BOUNDS/100.0,
         maximum_distance: LIGHTING_BOUNDS,
         ..default()
     }
@@ -144,26 +165,25 @@ fn setup(
     // plane
     commands.spawn((
         Mesh3d(meshes.add(
-        Plane3d::default().mesh()
-        .size(MAP_SIZE, MAP_SIZE)
-        .subdivisions(MAP_SIZE as u32 / 10)
-    )),
+            Plane3d::default().mesh()
+            .size(MAP_SIZE, MAP_SIZE)
+            .subdivisions((MAP_SIZE * TERRAIN_QUALITY) as u32)
+        )),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.3, 0.5, 0.3),
+            base_color: Color::WHITE, // Set to white to allow vertex colors to show
             perceptual_roughness: 1.0, // 1.0 is fully matte, 0.0 is a mirror
             reflectance: 0.1,          // Lowering this also reduces "specular" highlights
             ..default()
         })),
         Ground,
-        //Wireframe,
     ));
 
     // Ocean
     commands.spawn((
         Mesh3d(meshes.add(
-        Plane3d::default().mesh()
-        .size(MAP_SIZE, MAP_SIZE)
-    )),
+            Plane3d::default().mesh()
+            .size(MAP_SIZE, MAP_SIZE)
+        )),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.3, 0.5))),
         NoWireframe,
         Transform::from_xyz(0.0, -2.0, 0.0),
@@ -176,8 +196,7 @@ fn setup(
         Transform::from_xyz(0.0, 35.0, 0.0),
         TestBox,
         Wireframe,
-        )
-    );
+    ));
     
     // Sun
     commands.spawn((
@@ -190,18 +209,16 @@ fn setup(
         cascade_shadow_config,
     ));
 
-
+    // UI
     commands.spawn((Text::new("Pos: N/A" ),
         Node {
             position_type: PositionType::Absolute,
-            bottom: px(12),
-            left: px(12),
+            bottom: px(12.0),
+            left: px(12.0),
             ..default()
         },
         Debugger
     ));
-
-
 }
 
 fn setup_camera_fog(mut commands: Commands) {
@@ -213,9 +230,9 @@ fn setup_camera_fog(mut commands: Commands) {
             directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.5),
             directional_light_exponent: 10.0,
             falloff: FogFalloff::from_visibility_colors(
-                FOG_DISTANCE * 50.0, // distance in world units up to which objects retain visibility (>= 5% contrast)
-                Color::srgb(0.35, 0.5, 0.66), // atmospheric extinction color (after light is lost due to absorption by atmospheric particles)
-                Color::srgb(0.8, 0.844, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
+                FOG_DISTANCE * 50.0, // distance in world units up to which objects retain visibility
+                Color::srgb(0.35, 0.5, 0.66), // atmospheric extinction color
+                Color::srgb(0.8, 0.844, 1.0), // atmospheric inscattering color
             ),
         },
     ));
@@ -227,7 +244,6 @@ struct Debugger;
 fn update_debugger(
     camera: Query<&Transform, With<Camera>>,
     mut debugger: Query<&mut Text, With<Debugger>>,
-
 ) {
     let mut message = debugger.single_mut().unwrap();
     message.0 = format!("Position: {:?}", camera.single().unwrap().translation);
@@ -246,13 +262,13 @@ fn camera_controls(
     mut camera_query: Query<&mut Transform, With<Camera>>,
 ) {
     let mut transform = camera_query.single_mut().unwrap();
-    let mut pan_speed = 50.0; 
+    let mut pan_speed = 100.0; 
     let rotation_speed = 1.0; 
     let mut pan_direction = Vec3::ZERO;
     let panning_delta = rotation_speed * time.delta_secs();
 
     if keyboard.pressed(KeyCode::ShiftLeft) {
-        pan_speed *= 5.00;
+        pan_speed *= 10.00;
     }
 
     let forward = transform.forward().as_vec3();
@@ -301,6 +317,4 @@ fn camera_controls(
 
     // Apply transform translation
     transform.translation += pan_direction.normalize_or_zero() * pan_speed * time.delta_secs();
-
-    
 }
