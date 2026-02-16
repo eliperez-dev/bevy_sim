@@ -38,8 +38,8 @@ impl WorldGenerator {
                 PerlinLayer::new(seed + 300, 2.0, 0.4),  
             ],
             // Note: Temperature and humidity need to be broad, so keep scales low!
-            temperature_layer: PerlinLayer::new(seed + 400, 0.15, 1.0),
-            humidity_layer: PerlinLayer::new(seed + 500, 0.15, 1.0),
+            temperature_layer: PerlinLayer::new(seed + 400, 0.05, 1.0),
+            humidity_layer: PerlinLayer::new(seed + 500, 0.05, 1.0),
         }
     }
 
@@ -104,19 +104,32 @@ impl PerlinLayer {
     pub fn get_level(&self, pos: &[f32; 3]) -> f32 {
         let height = self.perlin
             .get([
-                // 3. Add the offset to the lookup coordinates!
                 (pos[0] * self.horizontal_scale / 1000.0) as f64 + self.offset,
-                (pos[2] * self.horizontal_scale / 1000.0) as f64 + self.offset
+                (pos[2] * self.horizontal_scale / 1000.0) as f64 + (self.offset.sqrt() + 202994.0)
             ]
         ) as f32;
         height * self.vertical_scale
     }
 }
 
+fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
+    let desert_elev = -0.2;    
+    let grass_elev = 0.1;     // Slightly above sea level
+    let forest_elev = 0.2;    // Higher plateau
+    let taiga_elev = 0.8;     // High mountain base
+
+    // Use the same bilinear interpolation as the multiplier
+    let cold_blend = grass_elev + (taiga_elev - grass_elev) * humidity;
+    let hot_blend = desert_elev + (forest_elev - desert_elev) * humidity;
+
+    cold_blend + (hot_blend - cold_blend) * temp
+}
+
+
 fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
     // Define the extreme bounds for our biomes
-    let desert_mult = 0.15;  // Very flat dunes
-    let grass_mult = 0.5;    // Gentle rolling hills
+    let desert_mult = 0.05;  // Very flat dunes
+    let grass_mult = 0.25;    // Gentle rolling hills
     let forest_mult = 0.75;   // Steeper, uneven terrain
     let taiga_mult = 1.33;    // High, jagged mountains
 
@@ -163,7 +176,10 @@ pub fn modify_plane(
                     }
 
                     let height_multiplier = get_biome_height_multiplier(temp, humidity);
-                    let final_height = base_height * height_multiplier;
+                    let elevation_offset = get_biome_elevation_offset(temp, humidity);
+
+
+                    let final_height = base_height * height_multiplier + elevation_offset;
 
                     colors.push(get_terrain_color(final_height, temp, humidity));
 
@@ -173,9 +189,14 @@ pub fn modify_plane(
             }
             
             mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-            //mesh.compute_smooth_normals(); // Or duplicate/flat normals if fixing seams!
-            mesh.duplicate_vertices();
-            mesh.compute_flat_normals();
+
+            if COMPUTE_SMOOTH_NORMALS {
+                mesh.compute_smooth_normals();
+            } else {
+                mesh.duplicate_vertices();
+                mesh.compute_flat_normals()
+            }
+            
         }
     }
 }
@@ -214,18 +235,16 @@ pub fn generate_chunks(
             let distance_sq = dx * dx + dz * dz;
 
             // Only proceed if within the circular radius
-            if distance_sq <= render_distance_sq {
-                if chunk_manager.spawned_chunks.insert((x, z)) {
+            if distance_sq <= render_distance_sq
+                && chunk_manager.spawned_chunks.insert((x, z)) {
                     let x_pos = x as f32 * CHUNK_SIZE;
                     let z_pos = z as f32 * CHUNK_SIZE;
                     
-                    
-
                     commands.spawn((
                         Mesh3d(meshes.add(
                             Plane3d::default().mesh()
                             .size(CHUNK_SIZE, CHUNK_SIZE)
-                            .subdivisions((CHUNK_SIZE * TERRAIN_QUALITY) as u32)
+                            .subdivisions((CHUNK_SIZE / TERRAIN_QUALITY) as u32)
                         )),
                         MeshMaterial3d(materials.add(StandardMaterial {
                             base_color: Color::WHITE,
@@ -245,7 +264,6 @@ pub fn generate_chunks(
                         ));
                     });
                 }
-            }
         }
     }
 }
@@ -289,7 +307,6 @@ const GRASSLANDS_TERRAIN_LEVELS: &[TerrainStop] = &[
     TerrainStop { height: -0.5,  color: Color::srgb(0.8, 0.7, 0.5) }, // Sand
     TerrainStop { height: 0.3,  color: Color::srgb(0.2, 0.5, 0.2) }, // Grass
     TerrainStop { height: 1.5,  color: Color::srgb(0.5, 0.5, 0.5) }, // Rock
-    TerrainStop { height: 2.0,  color: Color::WHITE },               // Snow
 ];
 
 const DESERT_TERRAIN_LEVELS: &[TerrainStop] = &[
@@ -337,7 +354,6 @@ fn get_color_from_palette(height: f32, palette: &[TerrainStop]) -> Color {
     let base_color = lower.color.to_linear();
     let next_color = upper.color.to_linear();
 
-    // Notice we return Color here, not an f32 array yet
     if t > blend_start && TERRAIN_SMOOTHNESS > 0.0 {
         let blend_t = (t - blend_start) / TERRAIN_SMOOTHNESS;
         base_color.mix(&next_color, blend_t).into()
