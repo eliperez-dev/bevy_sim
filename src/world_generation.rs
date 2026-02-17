@@ -236,10 +236,16 @@ pub struct Chunk {
 pub struct ChunkManager {
     pub spawned_chunks: HashSet<(i32, i32)>,
 }
+
+#[derive(Resource)]
+pub struct SharedChunkMaterials {
+    pub terrain_material: Handle<StandardMaterial>,
+    pub water_material: Handle<StandardMaterial>,
+}
 pub fn generate_chunks(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    shared_materials: Res<SharedChunkMaterials>,
     mut chunk_manager: ResMut<ChunkManager>,
     camera: Query<&Transform, With<Camera>>,
 ) {
@@ -279,20 +285,13 @@ pub fn generate_chunks(
                 .size(CHUNK_SIZE, CHUNK_SIZE)
                 .subdivisions((TERRAIN_QUALITY) as u32)
             )),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                ..default()
-            })),
+            MeshMaterial3d(shared_materials.terrain_material.clone()),
             Transform::from_xyz(x_pos, 0.0, z_pos),
             Chunk { x: *x, z: *z },
         )).with_children(|parent| {
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.3, 0.3, 0.5),
-                    alpha_mode: AlphaMode::Blend,
-                    ..default()
-                })),
+                MeshMaterial3d(shared_materials.water_material.clone()),
                 Transform::from_xyz(0.0, 0.0, 0.0),
             ));
         });
@@ -310,19 +309,25 @@ pub fn despawn_out_of_bounds_chunks(
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
-    // Use a squared radius for despawning as well
     let despawn_distance_sq = (DESPAWN_DISTANCE as f32).powi(2);
+    
+    let mut chunks_to_despawn = Vec::new();
 
     for (entity, chunk) in &chunks {
         let dx = (chunk.x - cam_x) as f32;
         let dz = (chunk.z - cam_z) as f32;
         let distance_sq = dx * dx + dz * dz;
 
-        // If the chunk is further than the circular radius, despawn it
         if distance_sq > despawn_distance_sq {
-            commands.entity(entity).despawn();
-            chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+            chunks_to_despawn.push((entity, chunk.x, chunk.z, distance_sq));
         }
+    }
+
+    chunks_to_despawn.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
+
+    for (entity, x, z, _) in chunks_to_despawn.iter().take(MAX_CHUNKS_PER_FRAME) {
+        commands.entity(*entity).despawn_recursive();
+        chunk_manager.spawned_chunks.remove(&(*x, *z));
     }
 }
 

@@ -83,12 +83,25 @@ fn setup(
 
     // World Generator
     commands.insert_resource(WorldGenerator::new(0));
+    
+    // Shared materials for chunks
+    commands.insert_resource(SharedChunkMaterials {
+        terrain_material: materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            ..default()
+        }),
+        water_material: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.3, 0.3, 0.6),
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+    });
 
     // testbox
     commands.spawn( (
         Mesh3d(meshes.add(dbg!(CuboidMeshBuilder::default()))),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.3, 0.5))),
-        Transform::from_xyz(0.0, 35.0, 0.0),
+        Transform::from_xyz(0.0, 55.0, 0.0),
         TestBox,
     ));
     
