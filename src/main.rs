@@ -62,7 +62,7 @@ fn main() {
             global: false,
             default_color: WHITE.into(),
         })
-        .insert_resource(ChunkManager {spawned_chunks: HashSet::new()})
+        .insert_resource(ChunkManager {spawned_chunks: HashSet::new() })
         .add_systems(Startup, (setup, setup_camera_fog).chain())
         .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, handle_compute_tasks, despawn_out_of_bounds_chunks))
         .run();

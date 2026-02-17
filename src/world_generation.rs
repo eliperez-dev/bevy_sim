@@ -248,18 +248,20 @@ pub fn generate_chunks(
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
-    // Use a squared radius for faster comparison
     let render_distance_sq = (RENDER_DISTANCE as f32).powi(2);
+    let mut chunks_spawned = 0;
 
     for x in (cam_x - RENDER_DISTANCE)..=(cam_x + RENDER_DISTANCE) {
         for z in (cam_z - RENDER_DISTANCE)..=(cam_z + RENDER_DISTANCE) {
             
-            // Calculate distance from camera chunk to current loop chunk
+            if chunks_spawned >= MAX_CHUNKS_PER_FRAME {
+                return;
+            }
+
             let dx = (x - cam_x) as f32;
             let dz = (z - cam_z) as f32;
             let distance_sq = dx * dx + dz * dz;
 
-            // Only proceed if within the circular radius
             if distance_sq <= render_distance_sq
                 && chunk_manager.spawned_chunks.insert((x, z)) {
                     let x_pos = x as f32 * CHUNK_SIZE;
@@ -288,6 +290,8 @@ pub fn generate_chunks(
                             Transform::from_xyz(0.0, 0.0, 0.0),
                         ));
                     });
+                    
+                    chunks_spawned += 1;
                 }
         }
     }
@@ -321,42 +325,7 @@ pub fn despawn_out_of_bounds_chunks(
 }
 
 
-struct TerrainStop {
-    height: f32,
-    color: Color,
-}
 
-
-const GRASSLANDS_TERRAIN_LEVELS: &[TerrainStop] = &[
-    TerrainStop { height: -1.0, color: Color::srgb(0.3, 0.2, 0.1) }, // Dirt
-    TerrainStop { height: -0.5,  color: Color::srgb(0.8, 0.7, 0.5) }, // Sand
-    TerrainStop { height: 0.3,  color: Color::srgb(0.2, 0.5, 0.2) }, // Grass
-    TerrainStop { height: 1.5,  color: Color::srgb(0.5, 0.5, 0.5) }, // Rock
-];
-
-const DESERT_TERRAIN_LEVELS: &[TerrainStop] = &[
-    TerrainStop { height: -1.0, color: Color::srgb(0.6, 0.4, 0.2) }, // Hard dirt
-    TerrainStop { height: -0.5,  color: Color::srgb(0.9, 0.8, 0.5) }, // Sand
-    TerrainStop { height: 0.3,  color: Color::srgb(0.8, 0.6, 0.3) }, // Orange dunes
-    TerrainStop { height: 1.5,  color: Color::srgb(0.7, 0.4, 0.2) }, // Red Rock
-    TerrainStop { height: 2.0,  color: Color::srgb(0.6, 0.3, 0.1) }, // Dark Mesa peak
-];
-
-const TAIGA_TERRAIN_LEVELS: &[TerrainStop] = &[
-    TerrainStop { height: -1.0, color: Color::srgb(0.2, 0.2, 0.2) }, // Dark Dirt
-    TerrainStop { height: -0.5,  color: Color::srgb(0.4, 0.4, 0.4) }, // Gravel
-    TerrainStop { height: 0.3,  color: Color::srgb(0.1, 0.3, 0.2) }, // Dark Pine Grass
-    TerrainStop { height: 1.0,  color: Color::srgb(0.5, 0.5, 0.5) }, // Rock
-    TerrainStop { height: 1.5,  color: Color::WHITE },               // Heavy Snow
-];
-
-const FOREST_TERRAIN_LEVELS: &[TerrainStop] = &[
-    TerrainStop { height: -1.0, color: Color::srgb(0.3, 0.2, 0.1) }, // Dirt
-    TerrainStop { height: -0.5,  color: Color::srgb(0.2, 0.4, 0.1) }, // Deep Grass
-    TerrainStop { height: 0.3,  color: Color::srgb(0.1, 0.5, 0.1) }, // Lush Canopy
-    TerrainStop { height: 2.0,  color: Color::srgb(0.4, 0.4, 0.4) }, // Rock
-    TerrainStop { height: 2.5,  color: Color::WHITE },               // Snow
-];
 
 fn get_color_from_palette(height: f32, palette: &[TerrainStop]) -> Color {
     if height.is_nan() { return palette[0].color; }
