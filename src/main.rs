@@ -64,7 +64,7 @@ fn main() {
         })
         .insert_resource(ChunkManager {spawned_chunks: HashSet::new() })
         .add_systems(Startup, (setup, setup_camera_fog).chain())
-        .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, handle_compute_tasks, despawn_out_of_bounds_chunks))
+        .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, handle_compute_tasks, update_chunk_lod, despawn_out_of_bounds_chunks))
         .run();
 }
 
@@ -160,13 +160,16 @@ fn update_debugger(
     mut debugger: Query<&mut Text, With<Debugger>>,
 ) {
     let camera_pos = camera.single().unwrap().translation;
-    let biome = world.get_biome(&[camera_pos[0], camera_pos[1], camera_pos[1]]);
+    let camera_pos = &[camera_pos[0], camera_pos[1], camera_pos[1]];
+    let biome = world.get_biome(camera_pos);
     let message = &mut debugger.single_mut().unwrap().0;
+
+    let climate = world.get_climate(camera_pos);
 
     message.clear();
 
     message.push_str(&format!("Position: {:?}\n", camera_pos));
-    message.push_str(&format!("Biome: {:?}\n", biome));
+    message.push_str(&format!("Biome: {:?} Climate: {:?}\n", biome, climate));
     message.push_str(&format!("Chunks: {:?}", chunks.spawned_chunks.len()));
 
 }

@@ -230,6 +230,7 @@ pub fn handle_compute_tasks(
 pub struct Chunk {
     x: i32,
     z: i32,
+    current_lod: u32,
 }
 
 #[derive(Resource, Default)]
@@ -242,6 +243,19 @@ pub struct SharedChunkMaterials {
     pub terrain_material: Handle<StandardMaterial>,
     pub water_material: Handle<StandardMaterial>,
 }
+
+fn get_lod_subdivisions(distance_sq: f32) -> u32 {
+    let distance = distance_sq.sqrt();
+    
+    for (max_distance, subdivisions) in LOD_LEVELS.iter() {
+        if distance <= *max_distance {
+            return *subdivisions;
+        }
+    }
+    
+    LOD_LEVELS.last().unwrap().1
+}
+
 pub fn generate_chunks(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -273,21 +287,22 @@ pub fn generate_chunks(
 
     chunks_to_spawn.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
 
-    for (x, z, _) in chunks_to_spawn.iter().take(MAX_CHUNKS_PER_FRAME) {
+    for (x, z, distance_sq) in chunks_to_spawn.iter().take(MAX_CHUNKS_PER_FRAME) {
         chunk_manager.spawned_chunks.insert((*x, *z));
         
         let x_pos = *x as f32 * CHUNK_SIZE;
         let z_pos = *z as f32 * CHUNK_SIZE;
+        let lod = get_lod_subdivisions(*distance_sq);
         
         commands.spawn((
             Mesh3d(meshes.add(
                 Plane3d::default().mesh()
                 .size(CHUNK_SIZE, CHUNK_SIZE)
-                .subdivisions((TERRAIN_QUALITY) as u32)
+                .subdivisions(lod)
             )),
             MeshMaterial3d(shared_materials.terrain_material.clone()),
             Transform::from_xyz(x_pos, 0.0, z_pos),
-            Chunk { x: *x, z: *z },
+            Chunk { x: *x, z: *z, current_lod: lod },
         )).with_children(|parent| {
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE))),
@@ -295,6 +310,102 @@ pub fn generate_chunks(
                 Transform::from_xyz(0.0, 0.0, 0.0),
             ));
         });
+    }
+}
+
+pub fn update_chunk_lod(
+    mut commands: Commands,
+    camera: Query<&Transform, With<Camera>>,
+    mut chunks: Query<(Entity, &mut Chunk, &Mesh3d, &Transform), Without<ChunkTask>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    world_generator: Res<WorldGenerator>,
+) {
+    let cam_transform = camera.single().unwrap().translation;
+    
+    let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
+    let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
+    let thread_pool = AsyncComputeTaskPool::get();
+
+    let mut chunks_to_update = Vec::new();
+
+    for (entity, chunk, mesh_handle, transform) in &chunks {
+        let dx = (chunk.x - cam_x) as f32;
+        let dz = (chunk.z - cam_z) as f32;
+        let distance_sq = dx * dx + dz * dz;
+        
+        let desired_lod = get_lod_subdivisions(distance_sq);
+        
+        if desired_lod != chunk.current_lod {
+            chunks_to_update.push((entity, chunk.x, chunk.z, mesh_handle.clone(), *transform, desired_lod, distance_sq));
+        }
+    }
+
+    chunks_to_update.sort_by(|a, b| a.6.partial_cmp(&b.6).unwrap());
+
+    for (entity, _x, _z, old_mesh_handle, transform, desired_lod, _) in chunks_to_update.iter().take(MAX_CHUNKS_PER_FRAME) {
+        meshes.remove(old_mesh_handle);
+        
+        let new_mesh_handle = meshes.add(
+            Plane3d::default().mesh()
+            .size(CHUNK_SIZE, CHUNK_SIZE)
+            .subdivisions(*desired_lod)
+        );
+        
+        if let Some(mesh) = meshes.get(&new_mesh_handle) {
+            let mut mesh_clone = mesh.clone();
+            let world_gen = world_generator.clone();
+            let transform_clone = *transform;
+
+            let task = thread_pool.spawn(async move {
+                let mut colors: Vec<[f32; 4]> = Vec::new();
+
+                if let Some(VertexAttributeValues::Float32x3(positions)) = 
+                    mesh_clone.attribute_mut(Mesh::ATTRIBUTE_POSITION) 
+                {
+                    colors.reserve(positions.len());
+
+                    for pos in positions.iter_mut() {
+                        let world_pos = [
+                            pos[0] + transform_clone.translation.x,
+                            pos[1] + transform_clone.translation.y,
+                            pos[2] + transform_clone.translation.z,
+                        ];
+
+                        let mut base_height = 0.0;
+                        let (temp, humidity) = world_gen.get_climate(&world_pos);
+
+                        for layer in &world_gen.terrain_layers {
+                            base_height += layer.get_level(&world_pos);
+                        }
+
+                        let height_multiplier = get_biome_height_multiplier(temp, humidity);
+                        let elevation_offset = get_biome_elevation_offset(temp, humidity);
+
+                        let final_height = base_height * height_multiplier + elevation_offset;
+                        colors.push(get_terrain_color(final_height, temp, humidity));
+                        pos[1] = final_height * MAP_HEIGHT_SCALE;
+                    }
+                }
+                
+                mesh_clone.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+
+                if COMPUTE_SMOOTH_NORMALS {
+                    mesh_clone.compute_smooth_normals();
+                } else {
+                    mesh_clone.duplicate_vertices();
+                    mesh_clone.compute_flat_normals()
+                }
+                mesh_clone
+            });
+
+            commands.entity(*entity)
+                .insert(Mesh3d(new_mesh_handle))
+                .insert(ChunkTask(task));
+            
+            if let Ok((_, mut chunk, _, _)) = chunks.get_mut(*entity) {
+                chunk.current_lod = *desired_lod;
+            }
+        }
     }
 }
 
@@ -326,7 +437,7 @@ pub fn despawn_out_of_bounds_chunks(
     chunks_to_despawn.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
 
     for (entity, x, z, _) in chunks_to_despawn.iter().take(MAX_CHUNKS_PER_FRAME) {
-        commands.entity(*entity).despawn_recursive();
+        commands.entity(*entity).despawn();
         chunk_manager.spawned_chunks.remove(&(*x, *z));
     }
 }
