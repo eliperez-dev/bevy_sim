@@ -1,26 +1,13 @@
 use bevy::{
-    anti_alias::fxaa::Fxaa,
-    camera::Exposure,
     color::palettes::css::WHITE,
-    core_pipeline::tonemapping::Tonemapping,
-    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
-    input::keyboard::KeyCode,
-    light::{
-        light_consts::lux, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder, FogVolume,
-        VolumetricFog, VolumetricLight,
-    },
+    core_pipeline::Skybox,
+    light::CascadeShadowConfigBuilder,
     mesh::CuboidMeshBuilder,
-    pbr::{
-        Atmosphere, AtmosphereMode, AtmosphereSettings, ScatteringMedium,
-        wireframe::{WireframeConfig, WireframePlugin},
-    },
+    pbr::wireframe::{WireframeConfig, WireframePlugin},
     platform::collections::HashSet,
-    post_process::bloom::Bloom,
-    prelude::*,
-    render::{
-        settings::WgpuSettings,
-        RenderPlugin,
-    },
+    prelude::*, 
+    render::{RenderPlugin, settings::{WgpuFeatures, WgpuSettings}},
+    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig}
 };
 
 use world_generation::*;
@@ -32,14 +19,11 @@ mod consts;
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(GlobalAmbientLight::NONE)
-        .insert_resource(GameState::default())
         .add_plugins((
             DefaultPlugins.set(RenderPlugin {
                 render_creation: WgpuSettings {
                     // WARN this is a native only feature. It will not work with webgl or webgpu
-                    features: bevy::render::settings::WgpuFeatures::POLYGON_MODE_LINE,
+                    features: WgpuFeatures::POLYGON_MODE_LINE,
                     ..default()
                 }
                 .into(),
@@ -80,7 +64,7 @@ fn main() {
         })
         .insert_resource(ChunkManager {spawned_chunks: HashSet::new()})
         .add_systems(Startup, (setup, setup_camera_fog).chain())
-        .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, despawn_out_of_bounds_chunks, atmosphere_controls, dynamic_scene))
+        .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, handle_compute_tasks, despawn_out_of_bounds_chunks))
         .run();
 }
 
@@ -113,18 +97,10 @@ fn setup(
         DirectionalLight {
             color: Color::srgb(0.98, 0.95, 0.82),
             shadows_enabled: true,
-            illuminance: lux::RAW_SUNLIGHT,
             ..default()
         },
-        Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(0.0, -0.1, -1.0), Vec3::Y),
-        VolumetricLight,
+        Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(-0.15, -0.05, 0.25), Vec3::Y),
         cascade_shadow_config,
-    ));
-
-    // Fog Volume
-    commands.spawn((
-        FogVolume::default(),
-        Transform::from_scale(Vec3::new(10.0, 1.0, 10.0)).with_translation(Vec3::Y * 0.5),
     ));
 
     // UI
@@ -139,25 +115,25 @@ fn setup(
     ));
 }
 
-fn setup_camera_fog(
-    mut commands: Commands,
-    mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,
-) {
+fn setup_camera_fog(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-50.0, 100.0, 50.0).looking_at(Vec3::new(0.0, 80.0, 0.0), Vec3::Y),
-        Atmosphere::earthlike(scattering_mediums.add(ScatteringMedium::default())),
-        AtmosphereSettings::default(),
-        Exposure { ev100: 15.0 },
-        Tonemapping::AcesFitted,
-        Bloom::NATURAL,
-        AtmosphereEnvironmentMapLight::default(),
-        VolumetricFog {
-            ambient_intensity: 0.0,
-            ..default()
+        DistanceFog {
+            color: Color::srgba(0.35, 0.48, 0.66, 1.0),
+            directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.5),
+            directional_light_exponent: 10.0,
+            falloff: FogFalloff::from_visibility_colors(
+                FOG_DISTANCE * 50.0, // distance in world units up to which objects retain visibility
+                Color::srgb(0.35, 0.5, 0.66), // atmospheric extinction color
+                Color::srgb(0.8, 0.844, 1.0), // atmospheric inscattering color
+            ),
         },
-        Msaa::Off,
-        Fxaa::default(),
+        Skybox {
+            image: asset_server.load("skybox.ktx2"),
+            brightness: 1000.0,
+            ..Default::default()
+        },
     ));
 }
 
@@ -211,7 +187,7 @@ fn camera_controls(
     let up = transform.up().as_vec3();
 
     // Wireframe Enable
-    if keyboard.just_pressed(KeyCode::KeyI) {
+    if keyboard.just_pressed(KeyCode::KeyT) {
         wire_frame.global = !wire_frame.global;
     }
 
@@ -257,121 +233,4 @@ fn camera_controls(
 
     // Apply transform translation
     transform.translation += pan_direction.normalize_or_zero() * pan_speed * time.delta_secs();
-}
-
-#[derive(Resource)]
-struct GameState {
-    paused: bool,
-    high_fidelity: bool,
-}
-
-impl Default for GameState {
-    fn default() -> Self {
-        Self {
-            paused: false,
-            high_fidelity: true,
-        }
-    }
-}
-
-fn atmosphere_controls(
-    mut commands: Commands,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut atmosphere_settings: Query<&mut AtmosphereSettings>,
-    mut game_state: ResMut<GameState>,
-    mut camera_exposure: Query<&mut Exposure, With<Camera3d>>,
-    mut suns: Query<&mut Transform, With<DirectionalLight>>,
-    mut sun_lights: Query<&mut DirectionalLight>,
-    camera_query: Query<Entity, With<Camera3d>>,
-    sun_query: Query<Entity, With<DirectionalLight>>,
-    time: Res<Time>,
-) {
-    if keyboard_input.just_pressed(KeyCode::KeyH) {
-        game_state.high_fidelity = !game_state.high_fidelity;
-        println!("High Fidelity: {}", game_state.high_fidelity);
-
-        let camera_entity = camera_query.single().unwrap();
-        let sun_entity = sun_query.single().unwrap();
-
-        if game_state.high_fidelity {
-            commands.entity(camera_entity)
-                .insert(VolumetricFog {
-                    ambient_intensity: 0.0,
-                    ..default()
-                })
-                .insert(Bloom::NATURAL)
-                .insert(Fxaa::default());
-            
-            commands.entity(sun_entity).insert(VolumetricLight);
-
-            for mut l in &mut sun_lights {
-                l.shadows_enabled = true;
-            }
-        } else {
-            commands.entity(camera_entity)
-                .remove::<VolumetricFog>()
-                .remove::<Bloom>()
-                .remove::<Fxaa>();
-            
-            commands.entity(sun_entity).remove::<VolumetricLight>();
-
-            for mut l in &mut sun_lights {
-                l.shadows_enabled = false;
-            }
-        }
-    }
-
-    if keyboard_input.just_pressed(KeyCode::KeyR) {
-        for mut sun_transform in &mut suns {
-            *sun_transform = Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(0.0, -0.1, 1.0), Vec3::Y);
-        }
-        println!("Reset to sunrise");
-    }
-
-    if keyboard_input.just_pressed(KeyCode::KeyT) {
-        game_state.paused = !game_state.paused;
-        println!("Paused Time");
-    }
-
-    if keyboard_input.just_pressed(KeyCode::Digit1) {
-        for mut settings in &mut atmosphere_settings {
-            settings.rendering_method = AtmosphereMode::LookupTexture;
-            println!("Switched to lookup texture rendering method");
-        }
-    }
-
-    if keyboard_input.just_pressed(KeyCode::Digit2) {
-        for mut settings in &mut atmosphere_settings {
-            settings.rendering_method = AtmosphereMode::Raymarched;
-            println!("Switched to raymarched rendering method");
-        }
-    }
-
-    if keyboard_input.just_pressed(KeyCode::Enter) {
-        game_state.paused = !game_state.paused;
-    }
-
-    if keyboard_input.pressed(KeyCode::Minus) {
-        for mut exposure in &mut camera_exposure {
-            exposure.ev100 -= time.delta_secs() * 2.0;
-        }
-    }
-
-    if keyboard_input.pressed(KeyCode::Equal) {
-        for mut exposure in &mut camera_exposure {
-            exposure.ev100 += time.delta_secs() * 2.0;
-        }
-    }
-}
-
-fn dynamic_scene(
-    mut suns: Query<&mut Transform, With<DirectionalLight>>,
-    time: Res<Time>,
-    sun_motion_state: Res<GameState>,
-) {
-    // Only rotate the sun if motion is not paused
-    if !sun_motion_state.paused {
-        suns.iter_mut()
-            .for_each(|mut tf| tf.rotate_x(time.delta_secs() * std::f32::consts::PI / 10.0));
-    }
 }

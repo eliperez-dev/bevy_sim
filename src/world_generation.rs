@@ -1,5 +1,7 @@
 use bevy::color::Mix;
 use noise::{NoiseFn, Perlin};
+use bevy::tasks::{AsyncComputeTaskPool, Task};
+use futures_lite::future;
 
 use bevy::{
     mesh::VertexAttributeValues,
@@ -17,7 +19,7 @@ pub enum Biome {
     Forest, 
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct WorldGenerator {
     terrain_layers: Vec<PerlinLayer>,
     temperature_layer: PerlinLayer,
@@ -83,7 +85,7 @@ impl WorldGenerator {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 struct PerlinLayer {
     perlin: Perlin,
     horizontal_scale: f32,
@@ -113,7 +115,7 @@ impl PerlinLayer {
 }
 
 fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
-    let desert_elev = -0.2;    
+    let desert_elev = -0.1;    
     let grass_elev = 0.1;     // Slightly above sea level
     let forest_elev = 0.2;    // Higher plateau
     let taiga_elev = 0.8;     // High mountain base
@@ -129,8 +131,8 @@ fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
 fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
     // Define the extreme bounds for our biomes
     let desert_mult = 0.05;  // Very flat dunes
-    let grass_mult = 0.25;    // Gentle rolling hills
-    let forest_mult = 0.75;   // Steeper, uneven terrain
+    let grass_mult = 0.20;    // Gentle rolling hills
+    let forest_mult = 0.65;   // Steeper, uneven terrain
     let taiga_mult = 1.33;    // High, jagged mountains
 
     // Blend along the humidity axis (dry -> wet)
@@ -143,60 +145,83 @@ fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
     cold_blend + (hot_blend - cold_blend) * temp
 }
 
+#[derive(Component)]
+pub struct ChunkTask(Task<Mesh>);
+
 pub fn modify_plane(
-    query: Query<(&Mesh3d, &Transform), Added<Chunk>>,
+    mut commands: Commands,
+    query: Query<(Entity, &Mesh3d, &Transform), Added<Chunk>>,
     world_generator: Res<WorldGenerator>,
+    meshes: Res<Assets<Mesh>>,
+) {
+    let thread_pool = AsyncComputeTaskPool::get();
+    for (entity, mesh_handle, transform) in &query {
+        if let Some(mesh) = meshes.get(mesh_handle) {
+            let mut mesh_clone = mesh.clone();
+            let world_gen = world_generator.clone();
+            let transform_clone = *transform;
+
+            let task = thread_pool.spawn(async move {
+                let mut colors: Vec<[f32; 4]> = Vec::new();
+
+                if let Some(VertexAttributeValues::Float32x3(positions)) = 
+                    mesh_clone.attribute_mut(Mesh::ATTRIBUTE_POSITION) 
+                {
+                    colors.reserve(positions.len());
+
+                    for pos in positions.iter_mut() {
+                        let world_pos = [
+                            pos[0] + transform_clone.translation.x,
+                            pos[1] + transform_clone.translation.y,
+                            pos[2] + transform_clone.translation.z,
+                        ];
+
+                        let mut base_height = 0.0;
+                        let (temp, humidity) = world_gen.get_climate(&world_pos);
+
+                        for layer in &world_gen.terrain_layers {
+                            base_height += layer.get_level(&world_pos);
+                        }
+
+                        let height_multiplier = get_biome_height_multiplier(temp, humidity);
+                        let elevation_offset = get_biome_elevation_offset(temp, humidity);
+
+                        let final_height = base_height * height_multiplier + elevation_offset;
+                        colors.push(get_terrain_color(final_height, temp, humidity));
+                        pos[1] = final_height * MAP_HEIGHT_SCALE;
+                    }
+                }
+                
+                mesh_clone.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+
+                if COMPUTE_SMOOTH_NORMALS {
+                    mesh_clone.compute_smooth_normals();
+                } else {
+                    mesh_clone.duplicate_vertices();
+                    mesh_clone.compute_flat_normals()
+                }
+                mesh_clone
+            });
+
+            commands.entity(entity).insert(ChunkTask(task));
+        }
+    }
+}
+
+pub fn handle_compute_tasks(
+    mut commands: Commands,
+    mut tasks: Query<(Entity, &Mesh3d, &mut ChunkTask)>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    for (mesh_handle, transform) in &query {
-        // Get a mutable reference to the mesh asset
-        if let Some(mesh) = meshes.get_mut(mesh_handle) {
-            let mut colors: Vec<[f32; 4]> = Vec::new();
-
-            if let Some(VertexAttributeValues::Float32x3(positions)) = 
-                mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) 
-            {
-                colors.reserve(positions.len());
-
-                for pos in positions.iter_mut() {
-                    // Get world position by adding the chunk's transform
-                    let world_pos = [
-                        pos[0] + transform.translation.x,
-                        pos[1] + transform.translation.y,
-                        pos[2] + transform.translation.z,
-                    ];
-
-                    let mut base_height = 0.0;
-                    
-                    // Sample noise using the WORLD position
-                    let (temp, humidity) = world_generator.get_climate(&world_pos);
-
-                    for layer in &world_generator.terrain_layers {
-                        base_height += layer.get_level(&world_pos);
-                    }
-
-                    let height_multiplier = get_biome_height_multiplier(temp, humidity);
-                    let elevation_offset = get_biome_elevation_offset(temp, humidity);
-
-
-                    let final_height = base_height * height_multiplier + elevation_offset;
-
-                    colors.push(get_terrain_color(final_height, temp, humidity));
-
-                    // Update the visual local mesh position
-                    pos[1] = final_height * MAP_HEIGHT_SCALE;
-                }
+    for (entity, mesh_handle, mut task) in &mut tasks {
+        if let Some(new_mesh) = future::block_on(future::poll_once(&mut task.0)) {
+            // Update the mesh asset
+            if let Some(mesh) = meshes.get_mut(mesh_handle) {
+                *mesh = new_mesh;
             }
-            
-            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
 
-            if COMPUTE_SMOOTH_NORMALS {
-                mesh.compute_smooth_normals();
-            } else {
-                mesh.duplicate_vertices();
-                mesh.compute_flat_normals()
-            }
-            
+            // Remove the task component
+            commands.entity(entity).remove::<ChunkTask>();
         }
     }
 }
@@ -322,15 +347,15 @@ const TAIGA_TERRAIN_LEVELS: &[TerrainStop] = &[
     TerrainStop { height: -0.5,  color: Color::srgb(0.4, 0.4, 0.4) }, // Gravel
     TerrainStop { height: 0.3,  color: Color::srgb(0.1, 0.3, 0.2) }, // Dark Pine Grass
     TerrainStop { height: 1.0,  color: Color::srgb(0.5, 0.5, 0.5) }, // Rock
-    TerrainStop { height: 1.2,  color: Color::WHITE },               // Heavy Snow
+    TerrainStop { height: 1.5,  color: Color::WHITE },               // Heavy Snow
 ];
 
 const FOREST_TERRAIN_LEVELS: &[TerrainStop] = &[
     TerrainStop { height: -1.0, color: Color::srgb(0.3, 0.2, 0.1) }, // Dirt
     TerrainStop { height: -0.5,  color: Color::srgb(0.2, 0.4, 0.1) }, // Deep Grass
     TerrainStop { height: 0.3,  color: Color::srgb(0.1, 0.5, 0.1) }, // Lush Canopy
-    TerrainStop { height: 1.5,  color: Color::srgb(0.4, 0.4, 0.4) }, // Rock
-    TerrainStop { height: 2.0,  color: Color::WHITE },               // Snow
+    TerrainStop { height: 2.0,  color: Color::srgb(0.4, 0.4, 0.4) }, // Rock
+    TerrainStop { height: 2.5,  color: Color::WHITE },               // Snow
 ];
 
 fn get_color_from_palette(height: f32, palette: &[TerrainStop]) -> Color {
