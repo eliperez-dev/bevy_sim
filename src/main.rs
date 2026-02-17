@@ -81,7 +81,7 @@ fn main() {
         .insert_resource(DayNightCycle {
             time_of_day: 0.50, // Start at sunrise
             speed: 0.025,  
-            inclination: 0.8,     
+            inclination: -0.8,     
         })
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup_camera_system)
@@ -94,7 +94,8 @@ fn main() {
             modify_plane, 
             handle_compute_tasks, 
             update_chunk_lod, 
-            update_daylight_cycle.after(camera_controls)
+            update_daylight_cycle.after(camera_controls),
+            draw_lod_rings
         ))
         .add_systems(PostUpdate, despawn_out_of_bounds_chunks)
         .run();
@@ -210,7 +211,7 @@ fn setup_camera_fog(mut commands: Commands) {
             falloff: FogFalloff::ExponentialSquared{ 
                 // Tweak this number to make the fog thicker/thinner globally
                 // Higher number = thicker fog closer to the camera
-                density: 0.00002, 
+                density: 0.00001, 
             },
         }, 
         AmbientLight {
@@ -278,7 +279,7 @@ fn ui_example_system(
 
         if let Ok(mut fog) = fog_query.single_mut() {
             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
-                ui.add(egui::Slider::new(density, 0.00001..=0.00025).text("Fog Density"));
+                ui.add(egui::Slider::new(density, 0.000005..=0.00005).text("Fog Density"));
             }
         }
 
@@ -287,4 +288,27 @@ fn ui_example_system(
         }
     });
     Ok(())
+}
+
+fn draw_lod_rings(
+    mut gizmos: Gizmos,
+    query: Query<&GlobalTransform, With<MainCamera>>,
+    wire_frame: Res<WireframeConfig>,
+) {
+    if !wire_frame.global {
+        return;
+    }
+    let Ok(transform) = query.single() else { return };
+    let translation = transform.translation();
+
+    for (distance, _) in LOD_LEVELS {
+        gizmos.circle(
+            Isometry3d::new(
+                Vec3::new(translation.x, MAP_HEIGHT_SCALE * 10.0 / 3.0, translation.z), 
+                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            ),
+            distance * CHUNK_SIZE,
+            Color::srgb(1.0, 0.0, 0.0),
+        );
+    }
 }

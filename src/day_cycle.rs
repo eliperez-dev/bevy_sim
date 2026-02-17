@@ -17,7 +17,7 @@ pub fn update_daylight_cycle(
     time: Res<Time>,
     mut cycle: ResMut<DayNightCycle>,
     mut clear_color: ResMut<ClearColor>,
-    mut sun_query: Query<(&mut Transform, &mut DirectionalLight), (With<Sun>, Without<MainCamera>)>,
+    mut sun_query: Query<(&mut Transform, &mut DirectionalLight, &mut Mesh3d), (With<Sun>, Without<MainCamera>)>,
     mut env_query: Query<(&mut DistanceFog, &mut AmbientLight)>, 
     camera_query: Query<&Transform, (With<MainCamera>, Without<Sun>)>,
     chunk_manager: Res<ChunkManager>,
@@ -36,7 +36,7 @@ pub fn update_daylight_cycle(
     let tilt_rotation = Quat::from_rotation_z(cycle.inclination);
         
 
-    if let Ok((mut transform, mut light)) = sun_query.single_mut() {
+    if let Ok((mut transform, mut light, mut mesh)) = sun_query.single_mut() {
         transform.rotation = tilt_rotation * orbit_rotation;
 
         let sun_dir = transform.forward().as_vec3();
@@ -49,7 +49,7 @@ pub fn update_daylight_cycle(
         
         // NEW: Horizon factor. Peaks at 1.0 when up_dot is 0.0, fades to 0.0 by +/- 0.25
         // Tweak the 0.25 to make the sunset phase last longer or shorter.
-        let horizon_factor = (1.0 - (up_dot.abs() / 0.25)).clamp(0.0, 1.0);
+        let horizon_factor = (1.0 - (up_dot.abs() / 0.35)).clamp(0.0, 1.0);
 
         // Apply lighting
         light.illuminance = daylight * MAX_ILLUMANENCE;
@@ -79,6 +79,8 @@ pub fn update_daylight_cycle(
         // Keep sun mesh far away in the background
         if let Ok(camera_transform) = camera_query.single() {
             transform.translation = camera_transform.translation - sun_dir * CHUNK_SIZE * chunk_manager.render_distance as f32;
+            let scale_factor = 0.1 * chunk_manager.render_distance as f32;
+            transform.scale = Vec3::splat(scale_factor);
         }
     }
 }

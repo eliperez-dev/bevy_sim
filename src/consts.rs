@@ -11,7 +11,7 @@ pub const LIGHTING_BOUNDS: f32 = 5000.0;
 pub const COMPUTE_SMOOTH_NORMALS: bool = false;
 
 pub const RENDER_DISTANCE: i32 = 150;
-pub const MAX_CHUNKS_PER_FRAME: usize = 100;
+pub const MAX_CHUNKS_PER_FRAME: usize = 200;
 
 pub const MAX_ILLUMANENCE: f32 = 7_300.0;
 
