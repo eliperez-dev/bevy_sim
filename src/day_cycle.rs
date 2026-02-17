@@ -12,7 +12,6 @@ pub struct DayNightCycle {
 #[derive(Component)]
 pub struct Sun;
 
-
 pub fn update_daylight_cycle(
     time: Res<Time>,
     mut cycle: ResMut<DayNightCycle>,
@@ -24,7 +23,7 @@ pub fn update_daylight_cycle(
     cycle.time_of_day = (cycle.time_of_day + cycle.speed * time.delta_secs()) % 1.0;
     
     // Convert 0.0-1.0 time to radians
-    let angle = cycle.time_of_day * core::f32::consts::TAU - core::f32::consts::FRAC_PI_2;
+    let angle = cycle.time_of_day * core::f32::consts::TAU;
 
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
         transform.rotation = Quat::from_rotation_x(angle) * Quat::from_rotation_y(0.5);
@@ -35,11 +34,15 @@ pub fn update_daylight_cycle(
 
         // We add 0.1 so dawn starts just below the horizon, and multiply by 5.0 to make the fade faster.
         let daylight = ((up_dot + 0.1) * 5.0).clamp(0.0, 1.0); 
+        
+        // NEW: Horizon factor. Peaks at 1.0 when up_dot is 0.0, fades to 0.0 by +/- 0.25
+        // Tweak the 0.25 to make the sunset phase last longer or shorter.
+        let horizon_factor = (1.0 - (up_dot.abs() / 0.25)).clamp(0.0, 1.0);
 
         // Apply lighting
         light.illuminance = daylight * MAX_ILLUMANENCE;
 
-        // 3. Update Environment
+        // Update Environment
         if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
             // Ambient light interpolates between 0.2 (Night) and 10.0 (Day)
             ambient.brightness = 5.5 + (daylight * 9.8); 
@@ -47,19 +50,22 @@ pub fn update_daylight_cycle(
             // Simple Fog Color Lerp (using Vec3 for universally safe math)
             let night_fog = Vec3::new(0.1, 0.1, 0.2);
             let day_fog = Vec3::new(0.35, 0.48, 0.66);
-            let current_fog = night_fog.lerp(day_fog, daylight);
+            let sunset_fog = Vec3::new(0.9, 0.45, 0.2); // An orange/pinkish hue
+            
+            // 1. Interpolate between night and day like normal
+            let base_fog = night_fog.lerp(day_fog, daylight);
+            // 2. Blend in the sunset color based on the horizon factor
+            let current_fog = base_fog.lerp(sunset_fog, horizon_factor);
             
             let final_color = Color::srgb(current_fog.x, current_fog.y, current_fog.z);
         
             fog.color = final_color;
             clear_color.0 = final_color; 
             
-            // FIX THE MOUNTAIN CLIPPING: 
-            // Setting this to entirely transparent turns off the fake screen-space glare.
             fog.directional_light_color = Color::NONE; 
         }
 
-        // 4. Keep sun mesh far away in the background
+        // Keep sun mesh far away in the background
         if let Ok(camera_transform) = camera_query.single() {
             transform.translation = camera_transform.translation - sun_dir * CHUNK_SIZE * RENDER_DISTANCE as f32;
         }

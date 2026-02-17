@@ -66,8 +66,8 @@ fn main() {
         .insert_resource(ChunkManager {spawned_chunks: HashSet::new(), last_camera_chunk: None, to_spawn: Vec::new(), lod_to_update: Vec::new()})
         // Initialize the daylight cycle
         .insert_resource(DayNightCycle {
-            time_of_day: 0.75, // Start at sunrise
-            speed: 0.05,       
+            time_of_day: 0.50, // Start at sunrise
+            speed: 0.025,       
         })
         .add_systems(Startup, (setup, setup_camera_fog).chain())
         .add_systems(Update, (
@@ -104,13 +104,13 @@ fn setup(
     commands.insert_resource(SharedChunkMaterials {
         terrain_material: materials.add(StandardMaterial {
             base_color: Color::WHITE,
-            perceptual_roughness: 0.8,
+            perceptual_roughness: 0.9,
             ..default()
         }),
         water_material: materials.add(StandardMaterial {
             base_color: Color::srgb(0.3, 0.3, 0.6),
             alpha_mode: AlphaMode::Blend,
-            perceptual_roughness: 0.2,
+            perceptual_roughness: 0.5,
             ..default()
         }),
     });
@@ -120,6 +120,7 @@ fn setup(
     let sun_material = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 1.0, 0.8),
         emissive: LinearRgba::rgb(100.0, 80.0, 20.0), // High values make it bloom/glow
+        fog_enabled: false,
         ..default()
     });
 
@@ -147,7 +148,6 @@ fn setup(
         Transform::from_xyz(0.0, 55.0, 0.0), // Position it where you want
     ));
     
-
     // UI
     commands.spawn((Text::new("Pos: N/A" ),
         Node {
@@ -171,7 +171,7 @@ fn setup_camera_fog(mut commands: Commands) {
             // Reduced alpha (0.2-0.4) prevents the "blinding" effect
             directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.1), 
             
-            directional_light_exponent: 100.0, 
+            directional_light_exponent: 1000.0, 
             
             falloff: FogFalloff::ExponentialSquared{ 
                 // Tweak this number to make the fog thicker/thinner globally
