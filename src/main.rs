@@ -1,6 +1,5 @@
 use bevy::{
     color::palettes::css::WHITE,
-    core_pipeline::Skybox,
     light::CascadeShadowConfigBuilder,
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     platform::collections::HashSet,
@@ -15,6 +14,14 @@ use consts::*;
 mod world_generation;
 mod consts;
 
+#[derive(Resource)]
+pub struct DayNightCycle {
+    pub time_of_day: f32,
+    pub speed: f32, 
+}
+
+#[derive(Component)]
+pub struct Sun;
 
 fn main() {
     App::new()
@@ -63,8 +70,22 @@ fn main() {
             default_color: WHITE.into(),
         })
         .insert_resource(ChunkManager {spawned_chunks: HashSet::new(), last_camera_chunk: None, to_spawn: Vec::new(), lod_to_update: Vec::new()})
+        // Initialize the daylight cycle
+        .insert_resource(DayNightCycle {
+            time_of_day: 0.75, // Start at sunrise
+            speed: 0.05,       
+        })
         .add_systems(Startup, (setup, setup_camera_fog).chain())
-        .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, handle_compute_tasks, update_chunk_lod, despawn_out_of_bounds_chunks))
+        .add_systems(Update, (
+            camera_controls, 
+            update_debugger, 
+            generate_chunks, 
+            modify_plane, 
+            handle_compute_tasks, 
+            update_chunk_lod, 
+            despawn_out_of_bounds_chunks,
+            update_daylight_cycle // Register the new daylight system
+        ))
         .run();
 }
 
@@ -109,10 +130,12 @@ fn setup(
         DirectionalLight {
             color: Color::srgb(0.98, 0.95, 0.82),
             shadows_enabled: true,
+            illuminance: MAX_ILLUMANENCE, // Set standard baseline illuminance
             ..default()
         },
         Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(-0.15, -0.05, 0.25), Vec3::Y),
         cascade_shadow_config,
+        Sun, // Tag the sun
     ));
 
     // UI
@@ -140,16 +163,16 @@ fn setup_camera_fog(mut commands: Commands, asset_server: Res<AssetServer>) {
             
             directional_light_exponent: 100.0, 
             
-            falloff: FogFalloff::from_visibility_colors(
-                FOG_DISTANCE * 40.0, // Reduced from 50.0 to make fog appear closer
-                Color::srgb(0.35, 0.5, 0.66), 
-                Color::srgb(0.8, 0.844, 1.0), 
-            ),
+            falloff: FogFalloff::Exponential{ 
+                // Tweak this number to make the fog thicker/thinner globally
+                // Higher number = thicker fog closer to the camera
+                density: 0.00015, 
+            },
         }, 
-        Skybox {
-            image: asset_server.load("skybox.ktx2"),
-            brightness: 1.0, // Start at 1.0 and increase slowly if needed
-            ..Default::default()
+        AmbientLight {
+            color: Color::WHITE,
+            brightness: 10.0,
+            affects_lightmapped_meshes: false, // Standard daytime ambient brightness
         },
     ));
 }
@@ -161,6 +184,7 @@ fn update_debugger(
     camera: Query<&Transform, With<Camera>>,
     world: Res<WorldGenerator>,
     chunks: Res<ChunkManager>,
+    cycle: Res<DayNightCycle>,
     mut debugger: Query<&mut Text, With<Debugger>>,
 ) {
     let cam_trans = camera.single().unwrap().translation;
@@ -174,12 +198,10 @@ fn update_debugger(
 
     message.push_str(&format!("Position: [{:.2}, {:.2}, {:.2}]\n", cam_trans.x, cam_trans.y, cam_trans.z));
     message.push_str(&format!("Biome: {:?} Climate: {:?}\n", biome, climate));
-    message.push_str(&format!("Chunks: {:?}", chunks.spawned_chunks.len()));
+    message.push_str(&format!("Chunks: {:?}\n", chunks.spawned_chunks.len())); // Added newline here
+    message.push_str(&format!("Time of Day: {:.2}\n", cycle.time_of_day)); // <-- Added daylight info
 }
 
-
-#[derive(Component)]
-struct TestBox;
 
 fn camera_controls(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -252,4 +274,54 @@ fn camera_controls(
 
     // Apply transform translation
     transform.translation += pan_direction.normalize_or_zero() * pan_speed * time.delta_secs();
+}
+
+
+fn update_daylight_cycle(
+    time: Res<Time>,
+    mut cycle: ResMut<DayNightCycle>,
+    mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
+    // Query both the Fog AND the AmbientLight component (they are on the same camera entity)
+    mut env_query: Query<(&mut DistanceFog, &mut AmbientLight)>, 
+) {
+    cycle.time_of_day = (cycle.time_of_day + cycle.speed * time.delta_secs()) % 1.0;
+    let angle = cycle.time_of_day * core::f32::consts::TAU - core::f32::consts::FRAC_PI_2;
+
+    let mut current_intensity = 0.0;
+
+    // 1. Update the Sun
+    if let Ok((mut transform, mut light)) = sun_query.single_mut() {
+        transform.rotation = Quat::from_rotation_x(angle) * Quat::from_rotation_y(0.5);
+
+        let sun_dir = transform.forward().as_vec3();
+        let up_dot = sun_dir.dot(Vec3::NEG_Y);
+        
+        current_intensity = up_dot.max(0.0);
+        light.illuminance = (MAX_ILLUMANENCE * current_intensity).max(MIN_ILLUMANENCE); 
+    }
+
+    // 2. Update the Fog and AmbientLight
+    if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
+        
+        // --- Ambient Light Fade ---
+        let max_ambient = 10.0; // Daytime brightness
+        let min_ambient = 0.2;  // Nighttime brightness (tweak this if it's too dark!)
+        ambient.brightness = min_ambient + (max_ambient - min_ambient) * current_intensity;
+
+        let day_r = 0.35; let day_g = 0.48; let day_b = 0.66;
+        let night_r = 0.02; let night_g = 0.02; let night_b = 0.05;
+
+        let r = night_r + (day_r - night_r) * current_intensity;
+        let g = night_g + (day_g - night_g) * current_intensity;
+        let b = night_b + (day_b - night_b) * current_intensity;
+        
+        // Update the base color (thickness remains exactly the same!)
+        fog.color = Color::srgb(r, g, b);
+
+        // Sunset glow
+        let sun_r = 1.0;
+        let sun_g = 0.4 + (0.55 * current_intensity);
+        let sun_b = 0.1 + (0.75 * current_intensity);
+        fog.directional_light_color = Color::srgba(sun_r, sun_g, sun_b, 0.15 * current_intensity);
+    }
 }

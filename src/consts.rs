@@ -7,13 +7,15 @@ pub const MAP_HEIGHT_SCALE: f32 = 200.0;
 pub const TERRAIN_SMOOTHNESS: f32 = 0.0;
 
 pub const LIGHTING_BOUNDS: f32 = 5000.0;
-pub const FOG_DISTANCE: f32 = 700.0;
 
 pub const COMPUTE_SMOOTH_NORMALS: bool = false;
 
 pub const RENDER_DISTANCE: i32 = 50;
 pub const DESPAWN_DISTANCE: i32 = RENDER_DISTANCE + 1;
 pub const MAX_CHUNKS_PER_FRAME: usize = 5;
+
+pub const MAX_ILLUMANENCE: f32 = 8_000.0;
+pub const MIN_ILLUMANENCE: f32 = 1_000.0;
 
 pub const LOD_LEVELS: [(f32, u32); 4] = [
     (5.0, 40),
