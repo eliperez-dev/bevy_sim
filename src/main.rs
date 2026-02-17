@@ -5,16 +5,22 @@ use bevy::{
     platform::collections::HashSet,
     prelude::*, 
     render::{RenderPlugin, settings::{WgpuFeatures, WgpuSettings}},
-    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig}
+    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
+    camera::ClearColorConfig,
 };
+
+
+use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
 use world_generation::*;
 use consts::*;
 use day_cycle::*;
+use controls::*;
 
 mod world_generation;
 mod consts;
 mod day_cycle;
+mod controls;
 
 
 fn main() {
@@ -63,12 +69,23 @@ fn main() {
             global: false,
             default_color: WHITE.into(),
         })
-        .insert_resource(ChunkManager {spawned_chunks: HashSet::new(), last_camera_chunk: None, to_spawn: Vec::new(), lod_to_update: Vec::new()})
+        .insert_resource(ChunkManager {
+            spawned_chunks: HashSet::new(),
+            last_camera_chunk: None,
+            to_spawn: Vec::new(),
+            lod_to_update: Vec::new(),
+            render_distance: RENDER_DISTANCE,
+        })
+        .init_resource::<WorldGenerationSettings>()
         // Initialize the daylight cycle
         .insert_resource(DayNightCycle {
             time_of_day: 0.50, // Start at sunrise
-            speed: 0.025,       
+            speed: 0.025,  
+            inclination: 0.8,     
         })
+        .add_plugins(EguiPlugin::default())
+        .add_systems(Startup, setup_camera_system)
+        .add_systems(EguiPrimaryContextPass, ui_example_system)
         .add_systems(Startup, (setup, setup_camera_fog).chain())
         .add_systems(Update, (
             camera_controls, 
@@ -77,11 +94,23 @@ fn main() {
             modify_plane, 
             handle_compute_tasks, 
             update_chunk_lod, 
-            despawn_out_of_bounds_chunks,
             update_daylight_cycle.after(camera_controls)
         ))
+        .add_systems(PostUpdate, despawn_out_of_bounds_chunks)
         .run();
 }
+
+fn setup_camera_system(mut commands: Commands) {
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+    ));
+}
+
 
 fn setup(
     mut commands: Commands,
@@ -163,6 +192,11 @@ fn setup(
 fn setup_camera_fog(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
+        Projection::from(PerspectiveProjection {
+            far: 50000.0,
+            ..default()
+        }),
+        MainCamera,
         Transform::from_xyz(-50.0, 100.0, 50.0).looking_at(Vec3::new(0.0, 80.0, 0.0), Vec3::Y),
         DistanceFog {
             // The base "thick" color of the fog
@@ -191,7 +225,7 @@ fn setup_camera_fog(mut commands: Commands) {
 struct Debugger;
 
 fn update_debugger(
-    camera: Query<&Transform, With<Camera>>,
+    camera: Query<&Transform, With<MainCamera>>,
     world: Res<WorldGenerator>,
     chunks: Res<ChunkManager>,
     cycle: Res<DayNightCycle>,
@@ -212,77 +246,45 @@ fn update_debugger(
     message.push_str(&format!("Time of Day: {:.2}\n", cycle.time_of_day)); // <-- Added daylight info
 }
 
+fn ui_example_system(
+    mut contexts: EguiContexts,
+    mut day_cycle: ResMut<DayNightCycle>,
+    mut wireframe_config: ResMut<WireframeConfig>,
+    mut chunk_manager: ResMut<ChunkManager>,
+    mut world_settings: ResMut<WorldGenerationSettings>,
+    mut fog_query: Query<&mut DistanceFog, With<MainCamera>>,
+) -> Result {
+    egui::Window::new("Debugger").show(contexts.ctx_mut()?, |ui| {
+        ui.heading("Time Settings");
+        
+        // Sun Time Slider
+        ui.add(egui::Slider::new(&mut day_cycle.time_of_day, 0.0..=1.0).text("Time of Day"));
+        
+        // Sun Speed
+        ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.1).text("Time Speed"));
+        
+        // Sun Inclination
+        ui.add(egui::Slider::new(&mut day_cycle.inclination, -1.0..=1.0).text("Inclination"));
 
-fn camera_controls(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut wire_frame: ResMut<WireframeConfig>,
-    mut camera_query: Query<&mut Transform, With<Camera>>,
-) {
+        ui.separator();
 
-    let mut transform = camera_query.single_mut().unwrap();
-    let mut pan_speed = 200.0; 
-    let rotation_speed = 1.0; 
-    let mut pan_direction = Vec3::ZERO;
-    let panning_delta = rotation_speed * time.delta_secs();
+        ui.heading("Render Settings");
+        
+        // Global Wireframe Toggle
+        ui.checkbox(&mut wireframe_config.global, "Global Wireframe");
 
-    if keyboard.pressed(KeyCode::ShiftLeft) {
-        pan_speed *= 15.00;
-    }
-    if keyboard.pressed(KeyCode::Tab) {
-        pan_speed *= 15.00;
-    }
+        ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=50).text("Render Distance"));
+        ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=100).text("Max Chunks / Frame"));
 
-    let forward = transform.forward().as_vec3();
-    let right = transform.right().as_vec3();
-    let up = transform.up().as_vec3();
+        if let Ok(mut fog) = fog_query.single_mut() {
+            if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
+                ui.add(egui::Slider::new(density, 0.00002..=0.002).text("Fog Density"));
+            }
+        }
 
-    // Wireframe Enable
-    if keyboard.just_pressed(KeyCode::KeyT) {
-        wire_frame.global = !wire_frame.global;
-    }
-
-    // Pan Forward/Backward 
-    if keyboard.pressed(KeyCode::KeyW) {
-        pan_direction += forward;
-    }
-    if keyboard.pressed(KeyCode::KeyS) {
-        pan_direction -= forward;
-    }
-
-    // Pan Left/Right
-    if keyboard.pressed(KeyCode::KeyA) {
-        pan_direction -= right;
-    }
-    if keyboard.pressed(KeyCode::KeyD) {
-        pan_direction += right;
-    }
-
-    // Pan Up/Down 
-    if keyboard.pressed(KeyCode::KeyE) {
-        pan_direction += up;
-    }
-    if keyboard.pressed(KeyCode::KeyQ) {
-        pan_direction -= up;
-    }
-
-    // Handle Yaw 
-    if keyboard.pressed(KeyCode::ArrowLeft) {
-        transform.rotate_y(panning_delta);
-    }
-    if keyboard.pressed(KeyCode::ArrowRight) {
-        transform.rotate_y(-panning_delta);
-    }
-
-    // Handle Pitch 
-    if keyboard.pressed(KeyCode::ArrowUp) {
-        transform.rotate_local_x(panning_delta);
-    }
-    if keyboard.pressed(KeyCode::ArrowDown) {
-        transform.rotate_local_x(-panning_delta);
-    }
-
-    // Apply transform translation
-    transform.translation += pan_direction.normalize_or_zero() * pan_speed * time.delta_secs();
+        if ui.button("Reset Simulation").clicked() {
+            day_cycle.time_of_day = 0.5;
+        }
+    });
+    Ok(())
 }
-

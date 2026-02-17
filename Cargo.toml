@@ -8,6 +8,8 @@ bevy = {version = "0.18.0", features = ["bevy_dev_tools"]}
 futures-lite = "2.6.1"
 noise = "0.9.0"
 
+bevy_egui = "0.39.1" # Check for the version matching your Bevy version
+
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1

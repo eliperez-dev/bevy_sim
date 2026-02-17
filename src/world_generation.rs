@@ -10,6 +10,7 @@ use bevy::{
 };
 
 use crate::consts::*;
+use crate::controls::MainCamera;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Biome {
@@ -264,6 +265,7 @@ pub struct ChunkManager {
     pub last_camera_chunk: Option<(i32, i32)>,
     pub to_spawn: Vec<(i32, i32)>,
     pub lod_to_update: Vec<Entity>,
+    pub render_distance: i32,
 }
 
 #[derive(Resource)]
@@ -284,27 +286,43 @@ fn get_lod_subdivisions(distance_sq: f32) -> u32 {
     LOD_LEVELS.last().unwrap().1
 }
 
+#[derive(Resource)]
+pub struct WorldGenerationSettings {
+    pub max_chunks_per_frame: usize,
+}
+
+impl Default for WorldGenerationSettings {
+    fn default() -> Self {
+        Self {
+            max_chunks_per_frame: MAX_CHUNKS_PER_FRAME,
+        }
+    }
+}
+
 pub fn generate_chunks(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     shared_materials: Res<SharedChunkMaterials>,
     mut chunk_manager: ResMut<ChunkManager>,
-    camera: Query<&Transform, With<Camera>>,
+    camera: Query<&Transform, With<MainCamera>>,
+    mut last_render_distance: Local<Option<i32>>,
+    settings: Res<WorldGenerationSettings>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
     
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
-    // Only re-scan if the camera has moved to a new chunk or we haven't scanned yet
-    if chunk_manager.last_camera_chunk != Some((cam_x, cam_z)) {
+    // Only re-scan if the camera has moved to a new chunk or render distance changed
+    if chunk_manager.last_camera_chunk != Some((cam_x, cam_z)) || *last_render_distance != Some(chunk_manager.render_distance) {
         chunk_manager.last_camera_chunk = Some((cam_x, cam_z));
+        *last_render_distance = Some(chunk_manager.render_distance);
         
-        let render_distance_sq = (RENDER_DISTANCE as f32).powi(2);
+        let render_distance_sq = (chunk_manager.render_distance as f32).powi(2);
         chunk_manager.to_spawn.clear();
 
-        for x in (cam_x - RENDER_DISTANCE)..=(cam_x + RENDER_DISTANCE) {
-            for z in (cam_z - RENDER_DISTANCE)..=(cam_z + RENDER_DISTANCE) {
+        for x in (cam_x - chunk_manager.render_distance)..=(cam_x + chunk_manager.render_distance) {
+            for z in (cam_z - chunk_manager.render_distance)..=(cam_z + chunk_manager.render_distance) {
                 let dx = (x - cam_x) as f32;
                 let dz = (z - cam_z) as f32;
                 let distance_sq = dx * dx + dz * dz;
@@ -326,14 +344,14 @@ pub fn generate_chunks(
 
     // Spawn a limited number of chunks from the queue
     let mut spawned_count = 0;
-    while spawned_count < MAX_CHUNKS_PER_FRAME && !chunk_manager.to_spawn.is_empty() {
+    while spawned_count < settings.max_chunks_per_frame && !chunk_manager.to_spawn.is_empty() {
         let (x, z) = chunk_manager.to_spawn.remove(0);
         
         // Final check: Is it still within range and not already spawned?
         let dx = (x - cam_x) as f32;
         let dz = (z - cam_z) as f32;
         let distance_sq = dx * dx + dz * dz;
-        let render_distance_sq = (RENDER_DISTANCE as f32).powi(2);
+        let render_distance_sq = (chunk_manager.render_distance as f32).powi(2);
 
         if distance_sq <= render_distance_sq && !chunk_manager.spawned_chunks.contains(&(x, z)) {
             chunk_manager.spawned_chunks.insert((x, z));
@@ -365,12 +383,13 @@ pub fn generate_chunks(
 
 pub fn update_chunk_lod(
     mut commands: Commands,
-    camera: Query<&Transform, With<Camera>>,
+    camera: Query<&Transform, With<MainCamera>>,
     mut chunks: Query<(Entity, &mut Chunk, &Mesh3d, &Transform), Without<ChunkTask>>,
     mut meshes: ResMut<Assets<Mesh>>,
     world_generator: Res<WorldGenerator>,
     mut chunk_manager: ResMut<ChunkManager>,
     mut last_cam_pos: Local<Option<(i32, i32)>>,
+    settings: Res<WorldGenerationSettings>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
@@ -401,7 +420,7 @@ pub fn update_chunk_lod(
     let mut processed_count = 0;
 
     // Process a limited number of LOD updates from the queue
-    while processed_count < MAX_CHUNKS_PER_FRAME && !chunk_manager.lod_to_update.is_empty() {
+    while processed_count < settings.max_chunks_per_frame && !chunk_manager.lod_to_update.is_empty() {
         let entity = chunk_manager.lod_to_update.remove(0);
 
         if let Ok((entity, chunk, _mesh_handle, transform)) = chunks.get_mut(entity) {
@@ -474,16 +493,17 @@ pub fn update_chunk_lod(
 
 pub fn despawn_out_of_bounds_chunks(
     mut commands: Commands,
-    camera: Query<&Transform, With<Camera>>,
+    camera: Query<&Transform, With<MainCamera>>,
     chunks: Query<(Entity, &Chunk)>,
     mut chunk_manager: ResMut<ChunkManager>,
+    settings: Res<WorldGenerationSettings>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
     
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
-    let despawn_distance_sq = (DESPAWN_DISTANCE as f32).powi(2);
+    let despawn_distance_sq = ((chunk_manager.render_distance + 1) as f32).powi(2);
     
     let mut chunks_to_despawn = Vec::new();
 
@@ -499,7 +519,7 @@ pub fn despawn_out_of_bounds_chunks(
 
     chunks_to_despawn.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
 
-    for (entity, x, z, _) in chunks_to_despawn.iter().take(MAX_CHUNKS_PER_FRAME * 2) {
+    for (entity, x, z, _) in chunks_to_despawn.iter().take(settings.max_chunks_per_frame * 2) {
         commands.entity(*entity).despawn();
         chunk_manager.spawned_chunks.remove(&(*x, *z));
     }

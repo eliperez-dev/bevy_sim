@@ -1,12 +1,13 @@
 
 use bevy::prelude::*;
 
-use crate::consts::*;
+use crate::{consts::*, world_generation::ChunkManager, controls::MainCamera};
 
 #[derive(Resource)]
 pub struct DayNightCycle {
     pub time_of_day: f32,
     pub speed: f32, 
+    pub inclination: f32,
 }
 
 #[derive(Component)]
@@ -16,17 +17,28 @@ pub fn update_daylight_cycle(
     time: Res<Time>,
     mut cycle: ResMut<DayNightCycle>,
     mut clear_color: ResMut<ClearColor>,
-    mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
+    mut sun_query: Query<(&mut Transform, &mut DirectionalLight), (With<Sun>, Without<MainCamera>)>,
     mut env_query: Query<(&mut DistanceFog, &mut AmbientLight)>, 
-    camera_query: Query<&Transform, (With<Camera>, Without<Sun>)>,
+    camera_query: Query<&Transform, (With<MainCamera>, Without<Sun>)>,
+    chunk_manager: Res<ChunkManager>,
 ) {
     cycle.time_of_day = (cycle.time_of_day + cycle.speed * time.delta_secs()) % 1.0;
-    
+
+
     // Convert 0.0-1.0 time to radians
     let angle = cycle.time_of_day * core::f32::consts::TAU;
 
+    // 1. Time of day rotation (The sun's progress through the sky)
+    let orbit_rotation = Quat::from_rotation_x(angle);
+
+    // 2. Inclination rotation (The tilt based on latitude)
+    // Rotating around Z tips the "noon" position away from the vertical (Y) axis
+    let tilt_rotation = Quat::from_rotation_z(cycle.inclination);
+        
+
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
-        transform.rotation = Quat::from_rotation_x(angle) * Quat::from_rotation_y(0.5);
+        transform.rotation = tilt_rotation * orbit_rotation;
+
         let sun_dir = transform.forward().as_vec3();
         
         // Dot product with straight down. 1.0 = noon, 0.0 = horizon, -1.0 = midnight
@@ -44,8 +56,7 @@ pub fn update_daylight_cycle(
 
         // Update Environment
         if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
-            // Ambient light interpolates between 0.2 (Night) and 10.0 (Day)
-            ambient.brightness = 5.5 + (daylight * 9.8); 
+            ambient.brightness = 6.0 + (daylight * 9.8); 
 
             // Simple Fog Color Lerp (using Vec3 for universally safe math)
             let night_fog = Vec3::new(0.1, 0.1, 0.2);
@@ -67,7 +78,7 @@ pub fn update_daylight_cycle(
 
         // Keep sun mesh far away in the background
         if let Ok(camera_transform) = camera_query.single() {
-            transform.translation = camera_transform.translation - sun_dir * CHUNK_SIZE * RENDER_DISTANCE as f32;
+            transform.translation = camera_transform.translation - sun_dir * CHUNK_SIZE * chunk_manager.render_distance as f32;
         }
     }
 }
