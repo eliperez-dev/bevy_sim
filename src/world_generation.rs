@@ -249,51 +249,53 @@ pub fn generate_chunks(
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
     let render_distance_sq = (RENDER_DISTANCE as f32).powi(2);
-    let mut chunks_spawned = 0;
+    
+    let mut chunks_to_spawn = Vec::new();
 
     for x in (cam_x - RENDER_DISTANCE)..=(cam_x + RENDER_DISTANCE) {
         for z in (cam_z - RENDER_DISTANCE)..=(cam_z + RENDER_DISTANCE) {
-            
-            if chunks_spawned >= MAX_CHUNKS_PER_FRAME {
-                return;
-            }
-
             let dx = (x - cam_x) as f32;
             let dz = (z - cam_z) as f32;
             let distance_sq = dx * dx + dz * dz;
 
             if distance_sq <= render_distance_sq
-                && chunk_manager.spawned_chunks.insert((x, z)) {
-                    let x_pos = x as f32 * CHUNK_SIZE;
-                    let z_pos = z as f32 * CHUNK_SIZE;
-                    
-                    commands.spawn((
-                        Mesh3d(meshes.add(
-                            Plane3d::default().mesh()
-                            .size(CHUNK_SIZE, CHUNK_SIZE)
-                            .subdivisions((TERRAIN_QUALITY) as u32)
-                        )),
-                        MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color: Color::WHITE,
-                            ..default()
-                        })),
-                        Transform::from_xyz(x_pos, 0.0, z_pos),
-                        Chunk { x, z },
-                    )).with_children(|parent| {
-                        parent.spawn((
-                            Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE))),
-                            MeshMaterial3d(materials.add(StandardMaterial {
-                                base_color: Color::srgb(0.3, 0.3, 0.5),
-                                alpha_mode: AlphaMode::Blend,
-                                ..default()
-                            })),
-                            Transform::from_xyz(0.0, 0.0, 0.0),
-                        ));
-                    });
-                    
-                    chunks_spawned += 1;
+                && !chunk_manager.spawned_chunks.contains(&(x, z)) {
+                    chunks_to_spawn.push((x, z, distance_sq));
                 }
         }
+    }
+
+    chunks_to_spawn.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+
+    for (x, z, _) in chunks_to_spawn.iter().take(MAX_CHUNKS_PER_FRAME) {
+        chunk_manager.spawned_chunks.insert((*x, *z));
+        
+        let x_pos = *x as f32 * CHUNK_SIZE;
+        let z_pos = *z as f32 * CHUNK_SIZE;
+        
+        commands.spawn((
+            Mesh3d(meshes.add(
+                Plane3d::default().mesh()
+                .size(CHUNK_SIZE, CHUNK_SIZE)
+                .subdivisions((TERRAIN_QUALITY) as u32)
+            )),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                ..default()
+            })),
+            Transform::from_xyz(x_pos, 0.0, z_pos),
+            Chunk { x: *x, z: *z },
+        )).with_children(|parent| {
+            parent.spawn((
+                Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.3, 0.3, 0.5),
+                    alpha_mode: AlphaMode::Blend,
+                    ..default()
+                })),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ));
+        });
     }
 }
 
