@@ -16,7 +16,8 @@ pub enum Biome {
     Desert,
     Grasslands,
     Taiga,
-    Forest, 
+    Forest,
+    Ocean,
 }
 
 #[derive(Resource, Clone)]
@@ -30,18 +31,15 @@ impl WorldGenerator {
     pub fn new(seed: u32) -> Self {
         Self {
             terrain_layers: vec![
-                // Base layer (Broad continents)
-                PerlinLayer::new(seed, 0.25, 3.5),      
-                // Detail 1 (Hills - double the frequency, half the amplitude)
+                PerlinLayer::new(seed,       0.15, 4.0),    
+                PerlinLayer::new(seed,       0.20, 3.5),      
                 PerlinLayer::new(seed + 100, 0.5, 1.75), 
-                // Detail 2 (Ridges)
-                PerlinLayer::new(seed + 200, 1.0, 0.8),  
-                // Detail 3 (Bumps/Rocks)
+                PerlinLayer::new(seed + 200, 1.0, 0.5),  
                 PerlinLayer::new(seed + 300, 2.0, 0.4),  
             ],
             // Note: Temperature and humidity need to be broad, so keep scales low!
-            temperature_layer: PerlinLayer::new(seed + 400, 0.05, 1.0),
-            humidity_layer: PerlinLayer::new(seed + 500, 0.05, 1.0),
+            temperature_layer: PerlinLayer::new(seed + 400, 0.03, 1.0),
+            humidity_layer: PerlinLayer::new(seed + 500, 0.03, 1.0),
         }
     }
 
@@ -65,6 +63,11 @@ impl WorldGenerator {
         // We divide by vertical_scale to reverse the multiplier you applied in get_level
         let temp_normalized = ((raw_temp / self.temperature_layer.vertical_scale) + 1.0) * 0.5;
         let hum_normalized = ((raw_hum / self.humidity_layer.vertical_scale) + 1.0) * 0.5;
+
+        // If it's extremely wet, call it Ocean regardless of temp
+        if hum_normalized > 0.75 {
+            return Biome::Ocean;
+        }
 
         // 3. Simple 2x2 Biome Matrix
         if temp_normalized > 0.5 { 
@@ -113,36 +116,44 @@ impl PerlinLayer {
         height * self.vertical_scale
     }
 }
-
 fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
-    let desert_elev = -0.1;    
-    let grass_elev = 0.1;     // Slightly above sea level
-    let forest_elev = 0.2;    // Higher plateau
-    let taiga_elev = 0.8;     // High mountain base
+    let desert_elev = 0.0;    
+    let grass_elev = 0.1;     
+    let forest_elev = 0.3;    
+    let taiga_elev = 3.0;     
+    let ocean_elev = -2.5; // Deep negative offset
 
-    // Use the same bilinear interpolation as the multiplier
+    // 1. Blend humidity
     let cold_blend = grass_elev + (taiga_elev - grass_elev) * humidity;
     let hot_blend = desert_elev + (forest_elev - desert_elev) * humidity;
+    let base_land_elev = cold_blend + (hot_blend - cold_blend) * temp;
 
-    cold_blend + (hot_blend - cold_blend) * temp
+    // 2. Blend toward ocean if humidity is high (0.7 -> 1.0 range)
+    if humidity > 0.7 {
+        let t = ((humidity - 0.7) / 0.3).clamp(0.0, 1.0);
+        base_land_elev + (ocean_elev - base_land_elev) * t
+    } else {
+        base_land_elev
+    }
 }
 
-
 fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
-    // Define the extreme bounds for our biomes
-    let desert_mult = 0.05;  // Very flat dunes
-    let grass_mult = 0.20;    // Gentle rolling hills
-    let forest_mult = 0.65;   // Steeper, uneven terrain
-    let taiga_mult = 1.33;    // High, jagged mountains
+    let desert_mult = 0.025;
+    let grass_mult = 0.2;
+    let forest_mult = 0.25;
+    let taiga_mult = 1.5;
+    let ocean_mult = 0.05; // Oceans are relatively flat at the bottom
 
-    // Blend along the humidity axis (dry -> wet)
-    // Lerp formula: start + (end - start) * percent
     let cold_blend = grass_mult + (taiga_mult - grass_mult) * humidity;
     let hot_blend = desert_mult + (forest_mult - desert_mult) * humidity;
+    let base_land_mult = cold_blend + (hot_blend - cold_blend) * temp;
 
-    // Blend along the temperature axis (cold -> hot)
-
-    cold_blend + (hot_blend - cold_blend) * temp
+    if humidity > 0.7 {
+        let t = ((humidity - 0.7) / 0.3).clamp(0.0, 1.0);
+        base_land_mult + (ocean_mult - base_land_mult) * t
+    } else {
+        base_land_mult
+    }
 }
 
 #[derive(Component)]
@@ -493,9 +504,6 @@ pub fn despawn_out_of_bounds_chunks(
         chunk_manager.spawned_chunks.remove(&(*x, *z));
     }
 }
-
-
-
 
 fn get_color_from_palette(height: f32, palette: &[TerrainStop]) -> Color {
     if height.is_nan() { return palette[0].color; }

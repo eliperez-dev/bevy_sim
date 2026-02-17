@@ -2,7 +2,6 @@ use bevy::{
     color::palettes::css::WHITE,
     core_pipeline::Skybox,
     light::CascadeShadowConfigBuilder,
-    mesh::CuboidMeshBuilder,
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     platform::collections::HashSet,
     prelude::*, 
@@ -40,6 +39,7 @@ fn main() {
                         font: default(),
                         // We could also disable font smoothing,
                         font_smoothing: bevy::text::FontSmoothing::default(),
+
                         ..default()
                     },
                     // We can also change color of the overlay
@@ -132,18 +132,23 @@ fn setup_camera_fog(mut commands: Commands, asset_server: Res<AssetServer>) {
         Camera3d::default(),
         Transform::from_xyz(-50.0, 100.0, 50.0).looking_at(Vec3::new(0.0, 80.0, 0.0), Vec3::Y),
         DistanceFog {
-            color: Color::srgba(0.35, 0.48, 0.66, 1.0),
-            directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.5),
-            directional_light_exponent: 10.0,
+            // The base "thick" color of the fog
+            color: Color::srgba(0.35, 0.48, 0.66, 1.0), 
+            
+            // Reduced alpha (0.2-0.4) prevents the "blinding" effect
+            directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.1), 
+            
+            directional_light_exponent: 100.0, 
+            
             falloff: FogFalloff::from_visibility_colors(
-                FOG_DISTANCE * 50.0, // distance in world units up to which objects retain visibility
-                Color::srgb(0.35, 0.5, 0.66), // atmospheric extinction color
-                Color::srgb(0.8, 0.844, 1.0), // atmospheric inscattering color
+                FOG_DISTANCE * 40.0, // Reduced from 50.0 to make fog appear closer
+                Color::srgb(0.35, 0.5, 0.66), 
+                Color::srgb(0.8, 0.844, 1.0), 
             ),
-        },
+        }, 
         Skybox {
             image: asset_server.load("skybox.ktx2"),
-            brightness: 1000.0,
+            brightness: 1.0, // Start at 1.0 and increase slowly if needed
             ..Default::default()
         },
     ));
@@ -158,19 +163,18 @@ fn update_debugger(
     chunks: Res<ChunkManager>,
     mut debugger: Query<&mut Text, With<Debugger>>,
 ) {
-    let camera_pos = camera.single().unwrap().translation;
-    let camera_pos = &[camera_pos[0], camera_pos[1], camera_pos[1]];
-    let biome = world.get_biome(camera_pos);
+    let cam_trans = camera.single().unwrap().translation;
+    let camera_pos_arr = &[cam_trans.x, cam_trans.y, cam_trans.z];
+    let biome = world.get_biome(camera_pos_arr);
     let message = &mut debugger.single_mut().unwrap().0;
 
-    let climate = world.get_climate(camera_pos);
+    let climate = world.get_climate(camera_pos_arr);
 
     message.clear();
 
-    message.push_str(&format!("Position: {:?}\n", camera_pos));
+    message.push_str(&format!("Position: [{:.2}, {:.2}, {:.2}]\n", cam_trans.x, cam_trans.y, cam_trans.z));
     message.push_str(&format!("Biome: {:?} Climate: {:?}\n", biome, climate));
     message.push_str(&format!("Chunks: {:?}", chunks.spawned_chunks.len()));
-
 }
 
 
