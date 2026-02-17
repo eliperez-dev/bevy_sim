@@ -64,7 +64,7 @@ fn main() {
         })
         .insert_resource(ChunkManager {spawned_chunks: HashSet::new(), last_camera_chunk: None, to_spawn: Vec::new(), lod_to_update: Vec::new()})
         .add_systems(Startup, (setup, setup_camera_fog).chain())
-        .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, handle_compute_tasks, update_chunk_lod, despawn_out_of_bounds_chunks))
+        .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, modify_clouds, handle_compute_tasks, handle_cloud_tasks, update_chunk_lod, despawn_out_of_bounds_chunks))
         .run();
 }
 
@@ -93,6 +93,13 @@ fn setup(
         water_material: materials.add(StandardMaterial {
             base_color: Color::srgb(0.3, 0.3, 0.6),
             alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+        cloud_material: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.95, 0.95, 1.0, 0.9),
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,
+            // unlit: true,
             ..default()
         }),
     });
@@ -136,9 +143,9 @@ fn setup_camera_fog(mut commands: Commands, asset_server: Res<AssetServer>) {
             color: Color::srgba(0.35, 0.48, 0.66, 1.0), 
             
             // Reduced alpha (0.2-0.4) prevents the "blinding" effect
-            directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.1), 
+            directional_light_color: Color::srgba(0.5, 0.5, 0.5, 0.01), 
             
-            directional_light_exponent: 100.0, 
+            directional_light_exponent: 200.0, 
             
             falloff: FogFalloff::from_visibility_colors(
                 FOG_DISTANCE * 40.0, // Reduced from 50.0 to make fog appear closer

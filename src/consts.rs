@@ -22,6 +22,13 @@ pub const LOD_LEVELS: [(f32, u32); 4] = [
     (35.0, 2),
 ];
 
+// Cloud Constants
+pub const CLOUD_HEIGHT_RANGE: (f32, f32) = (180.0, 300.0);
+pub const CLOUD_SCALE: f32 = 0.005; // Lower = Larger blobs
+pub const CLOUD_SIZE_RANGE: (f32, f32) = (60.0, 120.0); // Bigger clouds
+pub const CLOUDS_PER_CHUNK: u32 = 3; // Try more clouds per chunk
+pub const CLOUD_DISPLACEMENT: f32 = 60.0; // Stronger deformation
+
 
 
 pub struct TerrainStop {

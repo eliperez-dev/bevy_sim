@@ -20,11 +20,22 @@ pub enum Biome {
     Ocean,
 }
 
+#[derive(Component)]
+pub struct Cloud {
+    pub origin: Vec3,
+}
+
+#[derive(Component)]
+pub struct CloudTask {
+    pub task: Task<Mesh>,
+}
+
 #[derive(Resource, Clone)]
 pub struct WorldGenerator {
-    terrain_layers: Vec<PerlinLayer>,
-    temperature_layer: PerlinLayer,
-    humidity_layer: PerlinLayer,
+    pub terrain_layers: Vec<PerlinLayer>,
+    pub temperature_layer: PerlinLayer,
+    pub humidity_layer: PerlinLayer,
+    pub cloud_layer: PerlinLayer,
 }
 
 impl WorldGenerator {
@@ -40,6 +51,7 @@ impl WorldGenerator {
             // Note: Temperature and humidity need to be broad, so keep scales low!
             temperature_layer: PerlinLayer::new(seed + 400, 0.03, 1.0),
             humidity_layer: PerlinLayer::new(seed + 500, 0.03, 1.0),
+            cloud_layer: PerlinLayer::new(seed + 600, CLOUD_SCALE * 1000.0, 1.0),
         }
     }
 
@@ -114,6 +126,17 @@ impl PerlinLayer {
             ]
         ) as f32;
         height * self.vertical_scale
+    }
+
+    pub fn get_3d_level(&self, pos: &[f32; 3]) -> f32 {
+        let val = self.perlin
+            .get([
+                (pos[0] * self.horizontal_scale / 1000.0) as f64 + self.offset,
+                (pos[1] * self.horizontal_scale / 1000.0) as f64 + self.offset,
+                (pos[2] * self.horizontal_scale / 1000.0) as f64 + (self.offset.sqrt() + 202994.0)
+            ]
+        ) as f32;
+        val * self.vertical_scale
     }
 }
 fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
@@ -222,6 +245,93 @@ pub fn modify_plane(
     }
 }
 
+// Helper for deterministic random numbers
+fn pseudo_random(x: i32, z: i32, seed: u32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(374761393);
+    h = h.wrapping_add((z as u32).wrapping_mul(668265263));
+    h = h.wrapping_add(seed);
+    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    (h as f32) / (u32::MAX as f32)
+}
+
+pub fn modify_clouds(
+    mut commands: Commands,
+    query: Query<(Entity, &Mesh3d, &Cloud), Added<Cloud>>,
+    world_generator: Res<WorldGenerator>,
+    meshes: Res<Assets<Mesh>>,
+) {
+    let thread_pool = AsyncComputeTaskPool::get();
+    for (entity, mesh_handle, cloud) in &query {
+        if let Some(mesh) = meshes.get(mesh_handle) {
+            let mut mesh_clone = mesh.clone();
+            let world_gen = world_generator.clone();
+            let cloud_origin = cloud.origin;
+
+            let task = thread_pool.spawn(async move {
+                // 1. Extract normals first (immutable borrow)
+                let normals: Vec<[f32; 3]> = if let Some(VertexAttributeValues::Float32x3(normals)) = 
+                    mesh_clone.attribute(Mesh::ATTRIBUTE_NORMAL) 
+                {
+                    normals.clone()
+                } else {
+                    Vec::new()
+                };
+
+                // 2. Modify positions (mutable borrow)
+                if !normals.is_empty() {
+                    if let Some(VertexAttributeValues::Float32x3(positions)) = 
+                        mesh_clone.attribute_mut(Mesh::ATTRIBUTE_POSITION) 
+                    {
+                        for (i, pos) in positions.iter_mut().enumerate() {
+                            if i >= normals.len() { break; }
+                            
+                            let world_pos = [
+                                pos[0] + cloud_origin.x,
+                                pos[1] + cloud_origin.y,
+                                pos[2] + cloud_origin.z,
+                            ];
+
+                            // 3D Noise for deformation
+                            let noise_val = world_gen.cloud_layer.get_3d_level(&world_pos);
+                            
+                            // Displace along normal
+                            let displacement = noise_val * CLOUD_DISPLACEMENT;
+                            
+                            let normal = normals[i];
+                            pos[0] += normal[0] * displacement;
+                            pos[1] += normal[1] * displacement;
+                            pos[2] += normal[2] * displacement;
+                        }
+                    }
+                }
+                
+                mesh_clone.duplicate_vertices();
+                mesh_clone.compute_flat_normals();
+                bevy::camera::primitives::MeshAabb::compute_aabb(&mesh_clone);
+                mesh_clone
+            });
+
+            commands.entity(entity).insert(CloudTask { task });
+        }
+    }
+}
+
+pub fn handle_cloud_tasks(
+    mut commands: Commands,
+    mut tasks: Query<(Entity, &Mesh3d, &mut CloudTask)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    for (entity, mesh_handle, mut task) in &mut tasks {
+        if let Some(new_mesh) = future::block_on(future::poll_once(&mut task.task)) {
+            // Update the mesh in-place
+            if let Some(mesh) = meshes.get_mut(mesh_handle) {
+                *mesh = new_mesh;
+            }
+            commands.entity(entity).remove::<CloudTask>();
+        }
+    }
+}
+
 pub fn handle_compute_tasks(
     mut commands: Commands,
     mut tasks: Query<(Entity, &Mesh3d, &mut ChunkTask)>,
@@ -270,6 +380,7 @@ pub struct ChunkManager {
 pub struct SharedChunkMaterials {
     pub terrain_material: Handle<StandardMaterial>,
     pub water_material: Handle<StandardMaterial>,
+    pub cloud_material: Handle<StandardMaterial>,
 }
 
 fn get_lod_subdivisions(distance_sq: f32) -> u32 {
@@ -290,6 +401,7 @@ pub fn generate_chunks(
     shared_materials: Res<SharedChunkMaterials>,
     mut chunk_manager: ResMut<ChunkManager>,
     camera: Query<&Transform, With<Camera>>,
+    world_generator: Res<WorldGenerator>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
     
@@ -357,6 +469,51 @@ pub fn generate_chunks(
                     MeshMaterial3d(shared_materials.water_material.clone()),
                     Transform::from_xyz(0.0, 0.0, 0.0),
                 ));
+
+                // Cloud Spawning Logic
+                for i in 0..CLOUDS_PER_CHUNK {
+                    let seed = (x as u32).wrapping_mul(1000).wrapping_add((z as u32).wrapping_mul(100)).wrapping_add(i);
+                    let rx = pseudo_random(x, z, seed);
+                    let rz = pseudo_random(x, z, seed + 1);
+                    
+                    // Random position within chunk
+                    let cloud_x = (rx - 0.5) * CHUNK_SIZE + x_pos;
+                    let cloud_z = (rz - 0.5) * CHUNK_SIZE + z_pos;
+                    
+                    // Use humidity for cloud placement!
+                    let humidity_val = world_generator.humidity_layer.get_level(&[cloud_x, 0.0, cloud_z]);
+                    
+                    // Normalize humidity roughly (it's -1 to 1)
+                    // If humidity > 0.0 (50% coverage), spawn clouds.
+                    // Added jitter to seed to avoid grid artifacts
+                    if humidity_val > -0.2 && pseudo_random(x + i as i32, z - i as i32, seed + 2) > 0.3 {
+                        let ry = pseudo_random(x, z, seed + 3);
+                        let cloud_y = CLOUD_HEIGHT_RANGE.0 + ry * (CLOUD_HEIGHT_RANGE.1 - CLOUD_HEIGHT_RANGE.0);
+                        
+                        let size_factor = pseudo_random(x, z, seed + 4);
+                        let cloud_size = CLOUD_SIZE_RANGE.0 + size_factor * (CLOUD_SIZE_RANGE.1 - CLOUD_SIZE_RANGE.0);
+
+                        // Random rotation and scale
+                        let rot_x = pseudo_random(x, z, seed + 5) * 3.14;
+                        let rot_y = pseudo_random(x, z, seed + 6) * 3.14;
+                        let scale_x = 0.8 + pseudo_random(x, z, seed + 7) * 0.4;
+                        let scale_y = 0.5 + pseudo_random(x, z, seed + 8) * 0.5; // Flatter clouds
+                        let scale_z = 0.8 + pseudo_random(x, z, seed + 9) * 0.4;
+
+                        // Note: Transform is relative to parent (Chunk), so we need relative coordinates
+                        let rel_x = cloud_x - x_pos;
+                        let rel_z = cloud_z - z_pos;
+
+                        parent.spawn((
+                            Mesh3d(meshes.add(Sphere::new(cloud_size).mesh().ico(2).unwrap())), 
+                            MeshMaterial3d(shared_materials.cloud_material.clone()),
+                            Transform::from_xyz(rel_x, cloud_y, rel_z)
+                                .with_rotation(Quat::from_euler(EulerRot::XYZ, rot_x, rot_y, 0.0))
+                                .with_scale(Vec3::new(scale_x, scale_y, scale_z)),
+                            Cloud { origin: Vec3::new(cloud_x, cloud_y, cloud_z) },
+                        ));
+                    }
+                }
             });
             spawned_count += 1;
         }
