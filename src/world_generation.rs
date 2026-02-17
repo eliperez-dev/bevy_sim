@@ -32,7 +32,7 @@ impl WorldGenerator {
     pub fn new(seed: u32) -> Self {
         Self {
             terrain_layers: vec![
-                PerlinLayer::new(seed,       0.15, 4.0),    
+                PerlinLayer::new(seed,       0.08, 4.5),    
                 PerlinLayer::new(seed,       0.20, 3.5),      
                 PerlinLayer::new(seed + 100, 0.5, 1.75), 
                 PerlinLayer::new(seed + 200, 1.0, 0.5),  
@@ -66,7 +66,7 @@ impl WorldGenerator {
         let hum_normalized = ((raw_hum / self.humidity_layer.vertical_scale) + 1.0) * 0.5;
 
         // If it's extremely wet, call it Ocean regardless of temp
-        if hum_normalized > 0.75 {
+        if hum_normalized > OCEAN_THRESHOLD + 0.05 {
             return Biome::Ocean;
         }
 
@@ -80,10 +80,10 @@ impl WorldGenerator {
             }
         } else { 
             // Cold climates
-            if hum_normalized > 0.5 { 
-                Biome::Taiga // Cold & Wet
+            if hum_normalized < OCEAN_THRESHOLD / 2.0 { 
+                Biome::Grasslands
             } else { 
-                Biome::Grasslands // Cold & Dry
+                Biome::Taiga
             }
         }
     }
@@ -118,9 +118,9 @@ impl PerlinLayer {
     }
 }
 fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
-    let desert_elev = 0.0;    
-    let grass_elev = 0.1;     
-    let forest_elev = 0.3;    
+    let desert_elev = 1.0;    
+    let grass_elev = 1.0;     
+    let forest_elev = 2.0;    
     let taiga_elev = 3.0;     
     let ocean_elev = -2.5; // Deep negative offset
 
@@ -130,8 +130,8 @@ fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
     let base_land_elev = cold_blend + (hot_blend - cold_blend) * temp;
 
     // 2. Blend toward ocean if humidity is high (0.7 -> 1.0 range)
-    if humidity > 0.7 {
-        let t = ((humidity - 0.7) / 0.3).clamp(0.0, 1.0);
+    if humidity > OCEAN_THRESHOLD {
+        let t = ((humidity - OCEAN_THRESHOLD) / 0.3).clamp(0.0, 1.0);
         base_land_elev + (ocean_elev - base_land_elev) * t
     } else {
         base_land_elev
@@ -139,10 +139,10 @@ fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
 }
 
 fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
-    let desert_mult = 0.025;
+    let desert_mult = 0.25;
     let grass_mult = 0.2;
     let forest_mult = 0.25;
-    let taiga_mult = 1.5;
+    let taiga_mult = 2.3;
     let ocean_mult = 0.05; // Oceans are relatively flat at the bottom
 
     let cold_blend = grass_mult + (taiga_mult - grass_mult) * humidity;

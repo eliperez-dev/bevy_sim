@@ -210,7 +210,7 @@ fn setup_camera_fog(mut commands: Commands) {
             falloff: FogFalloff::ExponentialSquared{ 
                 // Tweak this number to make the fog thicker/thinner globally
                 // Higher number = thicker fog closer to the camera
-                density: 0.0002, 
+                density: 0.00002, 
             },
         }, 
         AmbientLight {
@@ -273,12 +273,12 @@ fn ui_example_system(
         // Global Wireframe Toggle
         ui.checkbox(&mut wireframe_config.global, "Global Wireframe");
 
-        ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=50).text("Render Distance"));
-        ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=100).text("Max Chunks / Frame"));
+        ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance"));
+        ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=250).text("Max Chunks / Frame"));
 
         if let Ok(mut fog) = fog_query.single_mut() {
             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
-                ui.add(egui::Slider::new(density, 0.00002..=0.002).text("Fog Density"));
+                ui.add(egui::Slider::new(density, 0.00001..=0.00025).text("Fog Density"));
             }
         }
 

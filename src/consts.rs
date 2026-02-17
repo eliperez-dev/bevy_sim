@@ -1,26 +1,31 @@
 
 use bevy::prelude::Color;
 
+pub const OCEAN_THRESHOLD: f32 = 0.45;
 
 pub const CHUNK_SIZE: f32 = 1000.0; 
-pub const MAP_HEIGHT_SCALE: f32 = 200.0;
+pub const MAP_HEIGHT_SCALE: f32 = 230.0;
 pub const TERRAIN_SMOOTHNESS: f32 = 0.0;
 
 pub const LIGHTING_BOUNDS: f32 = 5000.0;
-
 pub const COMPUTE_SMOOTH_NORMALS: bool = false;
 
-pub const RENDER_DISTANCE: i32 = 35;
-pub const MAX_CHUNKS_PER_FRAME: usize = 1;
+pub const RENDER_DISTANCE: i32 = 150;
+pub const MAX_CHUNKS_PER_FRAME: usize = 100;
 
 pub const MAX_ILLUMANENCE: f32 = 7_300.0;
 
+pub const LOD_QUALITY_MULTIPLIER: u32 = 1;
+pub const LOD_DISTANCE_MULTILIER: f32 = 2.0;
+
 pub const LOD_LEVELS: [(f32, u32); 4] = [
-    (5.0, 25),
-    (15.0, 10),
-    (25.0, 3),
-    (35.0, 1),
+    (5.0 * LOD_DISTANCE_MULTILIER , 8 * LOD_QUALITY_MULTIPLIER),
+    (10.0 * LOD_DISTANCE_MULTILIER, 4* LOD_QUALITY_MULTIPLIER),
+    (20.0 * LOD_DISTANCE_MULTILIER, 2 * LOD_QUALITY_MULTIPLIER),
+    (40.0 * LOD_DISTANCE_MULTILIER, 1 * LOD_QUALITY_MULTIPLIER),
 ];
+
+
 
 
 
@@ -33,7 +38,7 @@ pub const GRASSLANDS_TERRAIN_LEVELS: &[TerrainStop] = &[
     TerrainStop { height: -1.0, color: Color::srgb(0.3, 0.2, 0.1) }, // Dirt
     TerrainStop { height: -0.5,  color: Color::srgb(0.8, 0.7, 0.5) }, // Sand
     TerrainStop { height: 0.2,  color: Color::srgb(0.2, 0.5, 0.2) }, // Grass
-    TerrainStop { height: 1.5,  color: Color::srgb(0.5, 0.5, 0.5) }, // Rock
+    TerrainStop { height: 2.5,  color: Color::srgb(0.5, 0.5, 0.5) }, // Rock
 ];
 
 pub const DESERT_TERRAIN_LEVELS: &[TerrainStop] = &[
