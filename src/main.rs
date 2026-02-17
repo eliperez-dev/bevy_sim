@@ -84,6 +84,12 @@ fn setup(
     // World Generator
     commands.insert_resource(WorldGenerator::new(0));
     
+    // Vegetation Handles
+    commands.insert_resource(VegetationHandles {
+        tree: asset_server.load("tree.gltf#Scene0"),
+        pine: asset_server.load("pine tree.gltf#Scene0"),
+    });
+    
     // Shared materials for chunks
     commands.insert_resource(SharedChunkMaterials {
         terrain_material: materials.add(StandardMaterial {
@@ -97,12 +103,7 @@ fn setup(
         }),
     });
 
-    // Tree
-    commands.spawn((
-        // The "#Scene0" points to the default scene inside the glTF file
-        SceneRoot(asset_server.load("tree.gltf#Scene0")), 
-        Transform::from_xyz(0.0, 55.0, 0.0), // Position it where you want
-    ));
+
     
     // Sun
     commands.spawn((

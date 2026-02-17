@@ -86,6 +86,21 @@ impl WorldGenerator {
             }
         }
     }
+
+    pub fn get_height(&self, pos: &[f32; 3]) -> (f32, f32, f32) {
+        let mut base_height = 0.0;
+        let (temp, humidity) = self.get_climate(pos);
+
+        for layer in &self.terrain_layers {
+            base_height += layer.get_level(pos);
+        }
+
+        let height_multiplier = get_biome_height_multiplier(temp, humidity);
+        let elevation_offset = get_biome_elevation_offset(temp, humidity);
+
+        let final_height = base_height * height_multiplier + elevation_offset;
+        (final_height, temp, humidity)
+    }
 }
 
 #[derive(Resource, Clone)]
@@ -156,9 +171,21 @@ fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
     }
 }
 
+#[derive(Resource, Default)]
+pub struct VegetationHandles {
+    pub tree: Handle<Scene>,
+    pub pine: Handle<Scene>,
+}
+
+#[derive(Clone, Copy)]
+pub enum TreeType {
+    Oak,
+    Pine,
+}
+
 #[derive(Component)]
 pub struct ChunkTask {
-    pub task: Task<Mesh>,
+    pub task: Task<(Mesh, Vec<(Vec3, TreeType)>)>,
     pub new_handle: Option<Handle<Mesh>>,
 }
 
@@ -177,6 +204,7 @@ pub fn modify_plane(
 
             let task = thread_pool.spawn(async move {
                 let mut colors: Vec<[f32; 4]> = Vec::new();
+                let mut trees: Vec<(Vec3, TreeType)> = Vec::new();
 
                 if let Some(VertexAttributeValues::Float32x3(positions)) = 
                     mesh_clone.attribute_mut(Mesh::ATTRIBUTE_POSITION) 
@@ -190,22 +218,80 @@ pub fn modify_plane(
                             pos[2] + transform_clone.translation.z,
                         ];
 
-                        let mut base_height = 0.0;
-                        let (temp, humidity) = world_gen.get_climate(&world_pos);
-
-                        for layer in &world_gen.terrain_layers {
-                            base_height += layer.get_level(&world_pos);
-                        }
-
-                        let height_multiplier = get_biome_height_multiplier(temp, humidity);
-                        let elevation_offset = get_biome_elevation_offset(temp, humidity);
-
-                        let final_height = base_height * height_multiplier + elevation_offset;
+                        let (final_height, temp, humidity) = world_gen.get_height(&world_pos);
+                        
                         colors.push(get_terrain_color(final_height, temp, humidity));
                         pos[1] = final_height * MAP_HEIGHT_SCALE;
                     }
                 }
                 
+                // Tree Generation
+                let step_size = 20.0; // Spacing between potential tree spots
+                let half_size = CHUNK_SIZE / 2.0;
+                let steps = (CHUNK_SIZE / step_size) as i32;
+
+                for x_step in 0..steps {
+                    for z_step in 0..steps {
+                        let x_base = -half_size + (x_step as f32 * step_size);
+                        let z_base = -half_size + (z_step as f32 * step_size);
+
+                        // Simple pseudo-random using sin/cos of coordinates
+                        let seed_x = x_base + transform_clone.translation.x;
+                        let seed_z = z_base + transform_clone.translation.z;
+                        let pseudo_random = ((seed_x * 12.9898 + seed_z * 78.233).sin() * 43758.5453).fract().abs();
+                        let pseudo_random2 = ((seed_x * 93.9898 + seed_z * 65.233).cos() * 23456.5453).fract().abs();
+
+                        // Jitter position
+                        let x_pos = x_base + (pseudo_random * step_size * 0.8);
+                        let z_pos = z_base + (pseudo_random2 * step_size * 0.8);
+
+                        let world_pos_check = [
+                             x_pos + transform_clone.translation.x,
+                             0.0,
+                             z_pos + transform_clone.translation.z
+                        ];
+                        
+                        let (height, temp, humidity) = world_gen.get_height(&world_pos_check);
+                        let biome = world_gen.get_biome(&world_pos_check);
+                        
+                        // Check if valid for trees
+                        let mut spawn_tree = false;
+                        let mut tree_type = TreeType::Oak;
+                        
+                        // Height check (avoid underwater or too high)
+                        if height > 0.05 && height < 1.5 {
+                             match biome {
+                                 Biome::Forest => {
+                                     if pseudo_random > 0.3 { // 70% density
+                                         spawn_tree = true;
+                                         tree_type = TreeType::Oak;
+                                     }
+                                 },
+                                 Biome::Taiga => {
+                                     if pseudo_random > 0.4 { // 60% density
+                                         spawn_tree = true;
+                                         tree_type = TreeType::Pine;
+                                     }
+                                 },
+                                 Biome::Grasslands => {
+                                      if pseudo_random > 0.95 { // 5% density
+                                         spawn_tree = true;
+                                         tree_type = TreeType::Oak;
+                                      }
+                                 },
+                                 _ => {}
+                             }
+                        }
+                        
+                        if spawn_tree {
+                            trees.push((
+                                Vec3::new(x_pos, height * MAP_HEIGHT_SCALE, z_pos),
+                                tree_type
+                            ));
+                        }
+                    }
+                }
+
                 mesh_clone.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
 
                 if COMPUTE_SMOOTH_NORMALS {
@@ -214,7 +300,7 @@ pub fn modify_plane(
                     mesh_clone.duplicate_vertices();
                     mesh_clone.compute_flat_normals()
                 }
-                mesh_clone
+                (mesh_clone, trees)
             });
 
             commands.entity(entity).insert(ChunkTask { task, new_handle: None });
@@ -226,9 +312,10 @@ pub fn handle_compute_tasks(
     mut commands: Commands,
     mut tasks: Query<(Entity, &Mesh3d, &mut ChunkTask)>,
     mut meshes: ResMut<Assets<Mesh>>,
+    vegetation: Res<VegetationHandles>,
 ) {
     for (entity, mesh_handle, mut task) in &mut tasks {
-        if let Some(new_mesh) = future::block_on(future::poll_once(&mut task.task)) {
+        if let Some((new_mesh, trees)) = future::block_on(future::poll_once(&mut task.task)) {
             if let Some(new_handle) = task.new_handle.take() {
                 // LOD update case: Update the NEW mesh and then swap it onto the entity
                 if let Some(mesh) = meshes.get_mut(&new_handle) {
@@ -238,11 +325,33 @@ pub fn handle_compute_tasks(
                 
                 // Now we can safely remove the old mesh
                 meshes.remove(mesh_handle);
+                // Note: We don't spawn trees on LOD updates to avoid duplication
             } else {
                 // Initial generation case: Update the current mesh in-place
                 if let Some(mesh) = meshes.get_mut(mesh_handle) {
                     *mesh = new_mesh;
                 }
+                
+                // Spawn trees for new chunks
+                commands.entity(entity).with_children(|parent| {
+                    for (pos, tree_type) in trees {
+                        let scene_handle = match tree_type {
+                            TreeType::Oak => vegetation.tree.clone(),
+                            TreeType::Pine => vegetation.pine.clone(),
+                        };
+                        
+                        // Simple random rotation based on position
+                        let random_rot = (pos.x * 12.3 + pos.z * 45.6).sin() * std::f32::consts::PI;
+
+                        parent.spawn((
+                            SceneRoot(scene_handle),
+                            Transform::from_translation(pos)
+                                .with_rotation(Quat::from_rotation_y(random_rot))
+                                .with_scale(Vec3::splat(5.0))
+
+                        ));
+                    }
+                });
             }
 
             // Remove the task component
@@ -457,7 +566,7 @@ pub fn update_chunk_lod(
                         mesh_clone.duplicate_vertices();
                         mesh_clone.compute_flat_normals()
                     }
-                    mesh_clone
+                    (mesh_clone, Vec::<(Vec3, TreeType)>::new())
                 });
 
                 commands.entity(entity).insert(ChunkTask { task, new_handle: Some(new_mesh_handle) });

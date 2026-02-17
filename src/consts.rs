@@ -11,7 +11,7 @@ pub const FOG_DISTANCE: f32 = 700.0;
 
 pub const COMPUTE_SMOOTH_NORMALS: bool = false;
 
-pub const RENDER_DISTANCE: i32 = 50;
+pub const RENDER_DISTANCE: i32 = 5;
 pub const DESPAWN_DISTANCE: i32 = RENDER_DISTANCE + 1;
 pub const MAX_CHUNKS_PER_FRAME: usize = 5;
 
