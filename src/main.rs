@@ -72,6 +72,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     // Shadows
     let cascade_shadow_config = CascadeShadowConfigBuilder {
@@ -97,12 +98,11 @@ fn setup(
         }),
     });
 
-    // testbox
-    commands.spawn( (
-        Mesh3d(meshes.add(dbg!(CuboidMeshBuilder::default()))),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.3, 0.5))),
-        Transform::from_xyz(0.0, 55.0, 0.0),
-        TestBox,
+    // Tree
+    commands.spawn((
+        // The "#Scene0" points to the default scene inside the glTF file
+        SceneRoot(asset_server.load("tree.gltf#Scene0")), 
+        Transform::from_xyz(0.0, 55.0, 0.0), // Position it where you want
     ));
     
     // Sun

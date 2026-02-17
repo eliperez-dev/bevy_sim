@@ -146,7 +146,10 @@ fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
 }
 
 #[derive(Component)]
-pub struct ChunkTask(Task<Mesh>);
+pub struct ChunkTask {
+    pub task: Task<Mesh>,
+    pub new_handle: Option<Handle<Mesh>>,
+}
 
 pub fn modify_plane(
     mut commands: Commands,
@@ -203,7 +206,7 @@ pub fn modify_plane(
                 mesh_clone
             });
 
-            commands.entity(entity).insert(ChunkTask(task));
+            commands.entity(entity).insert(ChunkTask { task, new_handle: None });
         }
     }
 }
@@ -214,10 +217,21 @@ pub fn handle_compute_tasks(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     for (entity, mesh_handle, mut task) in &mut tasks {
-        if let Some(new_mesh) = future::block_on(future::poll_once(&mut task.0)) {
-            // Update the mesh asset
-            if let Some(mesh) = meshes.get_mut(mesh_handle) {
-                *mesh = new_mesh;
+        if let Some(new_mesh) = future::block_on(future::poll_once(&mut task.task)) {
+            if let Some(new_handle) = task.new_handle.take() {
+                // LOD update case: Update the NEW mesh and then swap it onto the entity
+                if let Some(mesh) = meshes.get_mut(&new_handle) {
+                    *mesh = new_mesh;
+                }
+                commands.entity(entity).insert(Mesh3d(new_handle));
+                
+                // Now we can safely remove the old mesh
+                meshes.remove(mesh_handle);
+            } else {
+                // Initial generation case: Update the current mesh in-place
+                if let Some(mesh) = meshes.get_mut(mesh_handle) {
+                    *mesh = new_mesh;
+                }
             }
 
             // Remove the task component
@@ -342,9 +356,7 @@ pub fn update_chunk_lod(
 
     chunks_to_update.sort_by(|a, b| a.6.partial_cmp(&b.6).unwrap());
 
-    for (entity, _x, _z, old_mesh_handle, transform, desired_lod, _) in chunks_to_update.iter().take(MAX_CHUNKS_PER_FRAME) {
-        meshes.remove(old_mesh_handle);
-        
+    for (entity, _x, _z, _old_mesh_handle, transform, desired_lod, _) in chunks_to_update.iter().take(MAX_CHUNKS_PER_FRAME) {
         let new_mesh_handle = meshes.add(
             Plane3d::default().mesh()
             .size(CHUNK_SIZE, CHUNK_SIZE)
@@ -399,8 +411,7 @@ pub fn update_chunk_lod(
             });
 
             commands.entity(*entity)
-                .insert(Mesh3d(new_mesh_handle))
-                .insert(ChunkTask(task));
+                .insert(ChunkTask { task, new_handle: Some(new_mesh_handle) });
             
             if let Ok((_, mut chunk, _, _)) = chunks.get_mut(*entity) {
                 chunk.current_lod = *desired_lod;
