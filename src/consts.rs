@@ -15,12 +15,11 @@ pub const RENDER_DISTANCE: i32 = 50;
 pub const DESPAWN_DISTANCE: i32 = RENDER_DISTANCE + 1;
 pub const MAX_CHUNKS_PER_FRAME: usize = 5;
 
-pub const LOD_LEVELS: [(f32, u32); 5] = [
-    (3.0, 40),
+pub const LOD_LEVELS: [(f32, u32); 4] = [
     (5.0, 40),
     (15.0, 20),
-    (30.0, 8),
-    (40.0, 1),
+    (25.0, 7),
+    (35.0, 2),
 ];
 
 

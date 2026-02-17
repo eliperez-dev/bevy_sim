@@ -250,6 +250,9 @@ pub struct Chunk {
 #[derive(Resource, Default)]
 pub struct ChunkManager {
     pub spawned_chunks: HashSet<(i32, i32)>,
+    pub last_camera_chunk: Option<(i32, i32)>,
+    pub to_spawn: Vec<(i32, i32)>,
+    pub lod_to_update: Vec<Entity>,
 }
 
 #[derive(Resource)]
@@ -282,48 +285,70 @@ pub fn generate_chunks(
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
-    let render_distance_sq = (RENDER_DISTANCE as f32).powi(2);
-    
-    let mut chunks_to_spawn = Vec::new();
+    // Only re-scan if the camera has moved to a new chunk or we haven't scanned yet
+    if chunk_manager.last_camera_chunk != Some((cam_x, cam_z)) {
+        chunk_manager.last_camera_chunk = Some((cam_x, cam_z));
+        
+        let render_distance_sq = (RENDER_DISTANCE as f32).powi(2);
+        chunk_manager.to_spawn.clear();
 
-    for x in (cam_x - RENDER_DISTANCE)..=(cam_x + RENDER_DISTANCE) {
-        for z in (cam_z - RENDER_DISTANCE)..=(cam_z + RENDER_DISTANCE) {
-            let dx = (x - cam_x) as f32;
-            let dz = (z - cam_z) as f32;
-            let distance_sq = dx * dx + dz * dz;
+        for x in (cam_x - RENDER_DISTANCE)..=(cam_x + RENDER_DISTANCE) {
+            for z in (cam_z - RENDER_DISTANCE)..=(cam_z + RENDER_DISTANCE) {
+                let dx = (x - cam_x) as f32;
+                let dz = (z - cam_z) as f32;
+                let distance_sq = dx * dx + dz * dz;
 
-            if distance_sq <= render_distance_sq
-                && !chunk_manager.spawned_chunks.contains(&(x, z)) {
-                    chunks_to_spawn.push((x, z, distance_sq));
-                }
+                if distance_sq <= render_distance_sq
+                    && !chunk_manager.spawned_chunks.contains(&(x, z)) {
+                        chunk_manager.to_spawn.push((x, z));
+                    }
+            }
         }
+        
+        // Sort by distance to camera so we spawn closest chunks first
+        chunk_manager.to_spawn.sort_by(|a, b| {
+            let da = ((a.0 - cam_x).pow(2) + (a.1 - cam_z).pow(2)) as f32;
+            let db = ((b.0 - cam_x).pow(2) + (b.1 - cam_z).pow(2)) as f32;
+            da.partial_cmp(&db).unwrap()
+        });
     }
 
-    chunks_to_spawn.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+    // Spawn a limited number of chunks from the queue
+    let mut spawned_count = 0;
+    while spawned_count < MAX_CHUNKS_PER_FRAME && !chunk_manager.to_spawn.is_empty() {
+        let (x, z) = chunk_manager.to_spawn.remove(0);
+        
+        // Final check: Is it still within range and not already spawned?
+        let dx = (x - cam_x) as f32;
+        let dz = (z - cam_z) as f32;
+        let distance_sq = dx * dx + dz * dz;
+        let render_distance_sq = (RENDER_DISTANCE as f32).powi(2);
 
-    for (x, z, distance_sq) in chunks_to_spawn.iter().take(MAX_CHUNKS_PER_FRAME) {
-        chunk_manager.spawned_chunks.insert((*x, *z));
-        
-        let x_pos = *x as f32 * CHUNK_SIZE;
-        let z_pos = *z as f32 * CHUNK_SIZE;
-        let lod = get_lod_subdivisions(*distance_sq);
-        
-        commands.spawn((
-            Mesh3d(meshes.add(
-                Plane3d::default().mesh()
-                .size(CHUNK_SIZE, CHUNK_SIZE)
-                .subdivisions(lod)
-            )),
-            MeshMaterial3d(shared_materials.terrain_material.clone()),
-            Transform::from_xyz(x_pos, 0.0, z_pos),
-            Chunk { x: *x, z: *z, current_lod: lod },
-        )).with_children(|parent| {
-            parent.spawn((
-                Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE))),
-                MeshMaterial3d(shared_materials.water_material.clone()),
-                Transform::from_xyz(0.0, 0.0, 0.0),
-            ));
-        });
+        if distance_sq <= render_distance_sq && !chunk_manager.spawned_chunks.contains(&(x, z)) {
+            chunk_manager.spawned_chunks.insert((x, z));
+            
+            let x_pos = x as f32 * CHUNK_SIZE;
+            let z_pos = z as f32 * CHUNK_SIZE;
+            let lod = get_lod_subdivisions(distance_sq);
+            
+            commands.spawn((
+                Mesh3d(meshes.add(
+                    Plane3d::default().mesh()
+                    .size(CHUNK_SIZE, CHUNK_SIZE)
+                    .subdivisions(lod)
+                )),
+                MeshMaterial3d(shared_materials.terrain_material.clone()),
+                Transform::from_xyz(x_pos, 0.0, z_pos),
+                Chunk { x, z, current_lod: lod },
+            )).with_children(|parent| {
+                parent.spawn((
+                    Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE))),
+                    MeshMaterial3d(shared_materials.water_material.clone()),
+                    Transform::from_xyz(0.0, 0.0, 0.0),
+                ));
+            });
+            spawned_count += 1;
+        }
     }
 }
 
@@ -333,88 +358,104 @@ pub fn update_chunk_lod(
     mut chunks: Query<(Entity, &mut Chunk, &Mesh3d, &Transform), Without<ChunkTask>>,
     mut meshes: ResMut<Assets<Mesh>>,
     world_generator: Res<WorldGenerator>,
+    mut chunk_manager: ResMut<ChunkManager>,
+    mut last_cam_pos: Local<Option<(i32, i32)>>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
-    
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
-    let thread_pool = AsyncComputeTaskPool::get();
 
-    let mut chunks_to_update = Vec::new();
-
-    for (entity, chunk, mesh_handle, transform) in &chunks {
-        let dx = (chunk.x - cam_x) as f32;
-        let dz = (chunk.z - cam_z) as f32;
-        let distance_sq = dx * dx + dz * dz;
+    // Only re-scan all chunks for LOD changes when the camera moves to a new chunk
+    if *last_cam_pos != Some((cam_x, cam_z)) {
+        *last_cam_pos = Some((cam_x, cam_z));
         
-        let desired_lod = get_lod_subdivisions(distance_sq);
-        
-        if desired_lod != chunk.current_lod {
-            chunks_to_update.push((entity, chunk.x, chunk.z, mesh_handle.clone(), *transform, desired_lod, distance_sq));
+        let mut candidates = Vec::new();
+        for (entity, chunk, _, _) in &chunks {
+            let dx = (chunk.x - cam_x) as f32;
+            let dz = (chunk.z - cam_z) as f32;
+            let distance_sq = dx * dx + dz * dz;
+            let desired_lod = get_lod_subdivisions(distance_sq);
+            
+            if desired_lod != chunk.current_lod {
+                candidates.push((entity, distance_sq));
+            }
         }
+
+        // Sort candidates by distance so we prioritize updating closer chunks
+        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        chunk_manager.lod_to_update = candidates.into_iter().map(|(e, _)| e).collect();
     }
 
-    chunks_to_update.sort_by(|a, b| a.6.partial_cmp(&b.6).unwrap());
+    let thread_pool = AsyncComputeTaskPool::get();
+    let mut processed_count = 0;
 
-    for (entity, _x, _z, _old_mesh_handle, transform, desired_lod, _) in chunks_to_update.iter().take(MAX_CHUNKS_PER_FRAME) {
-        let new_mesh_handle = meshes.add(
-            Plane3d::default().mesh()
-            .size(CHUNK_SIZE, CHUNK_SIZE)
-            .subdivisions(*desired_lod)
-        );
-        
-        if let Some(mesh) = meshes.get(&new_mesh_handle) {
-            let mut mesh_clone = mesh.clone();
-            let world_gen = world_generator.clone();
-            let transform_clone = *transform;
+    // Process a limited number of LOD updates from the queue
+    while processed_count < MAX_CHUNKS_PER_FRAME && !chunk_manager.lod_to_update.is_empty() {
+        let entity = chunk_manager.lod_to_update.remove(0);
 
-            let task = thread_pool.spawn(async move {
-                let mut colors: Vec<[f32; 4]> = Vec::new();
+        if let Ok((entity, chunk, _mesh_handle, transform)) = chunks.get_mut(entity) {
+            let dx = (chunk.x - cam_x) as f32;
+            let dz = (chunk.z - cam_z) as f32;
+            let distance_sq = dx * dx + dz * dz;
+            let desired_lod = get_lod_subdivisions(distance_sq);
 
-                if let Some(VertexAttributeValues::Float32x3(positions)) = 
-                    mesh_clone.attribute_mut(Mesh::ATTRIBUTE_POSITION) 
-                {
-                    colors.reserve(positions.len());
+            // Double check if it still needs an update (might have been updated by another frame's scan)
+            if desired_lod == chunk.current_lod {
+                continue;
+            }
 
-                    for pos in positions.iter_mut() {
-                        let world_pos = [
-                            pos[0] + transform_clone.translation.x,
-                            pos[1] + transform_clone.translation.y,
-                            pos[2] + transform_clone.translation.z,
-                        ];
-
-                        let mut base_height = 0.0;
-                        let (temp, humidity) = world_gen.get_climate(&world_pos);
-
-                        for layer in &world_gen.terrain_layers {
-                            base_height += layer.get_level(&world_pos);
-                        }
-
-                        let height_multiplier = get_biome_height_multiplier(temp, humidity);
-                        let elevation_offset = get_biome_elevation_offset(temp, humidity);
-
-                        let final_height = base_height * height_multiplier + elevation_offset;
-                        colors.push(get_terrain_color(final_height, temp, humidity));
-                        pos[1] = final_height * MAP_HEIGHT_SCALE;
-                    }
-                }
-                
-                mesh_clone.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-
-                if COMPUTE_SMOOTH_NORMALS {
-                    mesh_clone.compute_smooth_normals();
-                } else {
-                    mesh_clone.duplicate_vertices();
-                    mesh_clone.compute_flat_normals()
-                }
-                mesh_clone
-            });
-
-            commands.entity(*entity)
-                .insert(ChunkTask { task, new_handle: Some(new_mesh_handle) });
+            let new_mesh_handle = meshes.add(
+                Plane3d::default().mesh()
+                .size(CHUNK_SIZE, CHUNK_SIZE)
+                .subdivisions(desired_lod)
+            );
             
-            if let Ok((_, mut chunk, _, _)) = chunks.get_mut(*entity) {
-                chunk.current_lod = *desired_lod;
+            if let Some(mesh) = meshes.get(&new_mesh_handle) {
+                let mut mesh_clone = mesh.clone();
+                let world_gen = world_generator.clone();
+                let transform_clone = *transform;
+
+                let task = thread_pool.spawn(async move {
+                    let mut colors: Vec<[f32; 4]> = Vec::new();
+                    if let Some(VertexAttributeValues::Float32x3(positions)) = 
+                        mesh_clone.attribute_mut(Mesh::ATTRIBUTE_POSITION) 
+                    {
+                        colors.reserve(positions.len());
+                        for pos in positions.iter_mut() {
+                            let world_pos = [
+                                pos[0] + transform_clone.translation.x,
+                                pos[1] + transform_clone.translation.y,
+                                pos[2] + transform_clone.translation.z,
+                            ];
+                            let mut base_height = 0.0;
+                            let (temp, humidity) = world_gen.get_climate(&world_pos);
+                            for layer in &world_gen.terrain_layers {
+                                base_height += layer.get_level(&world_pos);
+                            }
+                            let height_multiplier = get_biome_height_multiplier(temp, humidity);
+                            let elevation_offset = get_biome_elevation_offset(temp, humidity);
+                            let final_height = base_height * height_multiplier + elevation_offset;
+                            colors.push(get_terrain_color(final_height, temp, humidity));
+                            pos[1] = final_height * MAP_HEIGHT_SCALE;
+                        }
+                    }
+                    mesh_clone.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+                    if COMPUTE_SMOOTH_NORMALS {
+                        mesh_clone.compute_smooth_normals();
+                    } else {
+                        mesh_clone.duplicate_vertices();
+                        mesh_clone.compute_flat_normals()
+                    }
+                    mesh_clone
+                });
+
+                commands.entity(entity).insert(ChunkTask { task, new_handle: Some(new_mesh_handle) });
+                
+                // Finalize the chunk's LOD state
+                if let Ok((_, mut chunk, _, _)) = chunks.get_mut(entity) {
+                    chunk.current_lod = desired_lod;
+                }
+                processed_count += 1;
             }
         }
     }
@@ -447,7 +488,7 @@ pub fn despawn_out_of_bounds_chunks(
 
     chunks_to_despawn.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
 
-    for (entity, x, z, _) in chunks_to_despawn.iter().take(MAX_CHUNKS_PER_FRAME) {
+    for (entity, x, z, _) in chunks_to_despawn.iter().take(MAX_CHUNKS_PER_FRAME * 2) {
         commands.entity(*entity).despawn();
         chunk_manager.spawned_chunks.remove(&(*x, *z));
     }

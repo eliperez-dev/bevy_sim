@@ -62,7 +62,7 @@ fn main() {
             global: false,
             default_color: WHITE.into(),
         })
-        .insert_resource(ChunkManager {spawned_chunks: HashSet::new() })
+        .insert_resource(ChunkManager {spawned_chunks: HashSet::new(), last_camera_chunk: None, to_spawn: Vec::new(), lod_to_update: Vec::new()})
         .add_systems(Startup, (setup, setup_camera_fog).chain())
         .add_systems(Update, (camera_controls, update_debugger, generate_chunks, modify_plane, handle_compute_tasks, update_chunk_lod, despawn_out_of_bounds_chunks))
         .run();
@@ -70,7 +70,6 @@ fn main() {
 
 fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
