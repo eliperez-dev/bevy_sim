@@ -10,9 +10,9 @@ pub const LIGHTING_BOUNDS: f32 = 5000.0;
 
 pub const COMPUTE_SMOOTH_NORMALS: bool = false;
 
-pub const RENDER_DISTANCE: i32 = 50;
+pub const RENDER_DISTANCE: i32 = 25;
 pub const DESPAWN_DISTANCE: i32 = RENDER_DISTANCE + 1;
-pub const MAX_CHUNKS_PER_FRAME: usize = 5;
+pub const MAX_CHUNKS_PER_FRAME: usize = 1;
 
 pub const MAX_ILLUMANENCE: f32 = 8_000.0;
 pub const MIN_ILLUMANENCE: f32 = 1_000.0;

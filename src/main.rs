@@ -10,18 +10,12 @@ use bevy::{
 
 use world_generation::*;
 use consts::*;
+use day_cycle::*;
 
 mod world_generation;
 mod consts;
+mod day_cycle;
 
-#[derive(Resource)]
-pub struct DayNightCycle {
-    pub time_of_day: f32,
-    pub speed: f32, 
-}
-
-#[derive(Component)]
-pub struct Sun;
 
 fn main() {
     App::new()
@@ -84,7 +78,7 @@ fn main() {
             handle_compute_tasks, 
             update_chunk_lod, 
             despawn_out_of_bounds_chunks,
-            update_daylight_cycle // Register the new daylight system
+            update_daylight_cycle.after(camera_controls)
         ))
         .run();
 }
@@ -93,6 +87,7 @@ fn setup(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
     // Shadows
     let cascade_shadow_config = CascadeShadowConfigBuilder {
@@ -109,14 +104,41 @@ fn setup(
     commands.insert_resource(SharedChunkMaterials {
         terrain_material: materials.add(StandardMaterial {
             base_color: Color::WHITE,
+            perceptual_roughness: 0.8,
             ..default()
         }),
         water_material: materials.add(StandardMaterial {
             base_color: Color::srgb(0.3, 0.3, 0.6),
             alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.2,
             ..default()
         }),
     });
+
+    // Sun Visuals
+    let sun_mesh = meshes.add(Sphere::new(300.0)); // Adjust size to taste
+    let sun_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 1.0, 0.8),
+        emissive: LinearRgba::rgb(100.0, 80.0, 20.0), // High values make it bloom/glow
+        ..default()
+    });
+
+    // Sun Entity
+    commands.spawn((
+        Mesh3d(sun_mesh),
+        MeshMaterial3d(sun_material),
+        DirectionalLight {
+            color: Color::srgb(0.98, 0.95, 0.82),
+            shadows_enabled: true,
+            illuminance: MAX_ILLUMANENCE, 
+            ..default()
+        },
+        // We will move the translation dynamically in the update system
+        Transform::default(), 
+        cascade_shadow_config,
+        bevy::camera::visibility::NoFrustumCulling,
+        Sun, 
+    ));
 
     // Tree
     commands.spawn((
@@ -125,18 +147,6 @@ fn setup(
         Transform::from_xyz(0.0, 55.0, 0.0), // Position it where you want
     ));
     
-    // Sun
-    commands.spawn((
-        DirectionalLight {
-            color: Color::srgb(0.98, 0.95, 0.82),
-            shadows_enabled: true,
-            illuminance: MAX_ILLUMANENCE, // Set standard baseline illuminance
-            ..default()
-        },
-        Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(-0.15, -0.05, 0.25), Vec3::Y),
-        cascade_shadow_config,
-        Sun, // Tag the sun
-    ));
 
     // UI
     commands.spawn((Text::new("Pos: N/A" ),
@@ -150,7 +160,7 @@ fn setup(
     ));
 }
 
-fn setup_camera_fog(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup_camera_fog(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-50.0, 100.0, 50.0).looking_at(Vec3::new(0.0, 80.0, 0.0), Vec3::Y),
@@ -163,10 +173,10 @@ fn setup_camera_fog(mut commands: Commands, asset_server: Res<AssetServer>) {
             
             directional_light_exponent: 100.0, 
             
-            falloff: FogFalloff::Exponential{ 
+            falloff: FogFalloff::ExponentialSquared{ 
                 // Tweak this number to make the fog thicker/thinner globally
                 // Higher number = thicker fog closer to the camera
-                density: 0.00015, 
+                density: 0.0002, 
             },
         }, 
         AmbientLight {
@@ -276,52 +286,3 @@ fn camera_controls(
     transform.translation += pan_direction.normalize_or_zero() * pan_speed * time.delta_secs();
 }
 
-
-fn update_daylight_cycle(
-    time: Res<Time>,
-    mut cycle: ResMut<DayNightCycle>,
-    mut sun_query: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
-    // Query both the Fog AND the AmbientLight component (they are on the same camera entity)
-    mut env_query: Query<(&mut DistanceFog, &mut AmbientLight)>, 
-) {
-    cycle.time_of_day = (cycle.time_of_day + cycle.speed * time.delta_secs()) % 1.0;
-    let angle = cycle.time_of_day * core::f32::consts::TAU - core::f32::consts::FRAC_PI_2;
-
-    let mut current_intensity = 0.0;
-
-    // 1. Update the Sun
-    if let Ok((mut transform, mut light)) = sun_query.single_mut() {
-        transform.rotation = Quat::from_rotation_x(angle) * Quat::from_rotation_y(0.5);
-
-        let sun_dir = transform.forward().as_vec3();
-        let up_dot = sun_dir.dot(Vec3::NEG_Y);
-        
-        current_intensity = up_dot.max(0.0);
-        light.illuminance = (MAX_ILLUMANENCE * current_intensity).max(MIN_ILLUMANENCE); 
-    }
-
-    // 2. Update the Fog and AmbientLight
-    if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
-        
-        // --- Ambient Light Fade ---
-        let max_ambient = 10.0; // Daytime brightness
-        let min_ambient = 0.2;  // Nighttime brightness (tweak this if it's too dark!)
-        ambient.brightness = min_ambient + (max_ambient - min_ambient) * current_intensity;
-
-        let day_r = 0.35; let day_g = 0.48; let day_b = 0.66;
-        let night_r = 0.02; let night_g = 0.02; let night_b = 0.05;
-
-        let r = night_r + (day_r - night_r) * current_intensity;
-        let g = night_g + (day_g - night_g) * current_intensity;
-        let b = night_b + (day_b - night_b) * current_intensity;
-        
-        // Update the base color (thickness remains exactly the same!)
-        fog.color = Color::srgb(r, g, b);
-
-        // Sunset glow
-        let sun_r = 1.0;
-        let sun_g = 0.4 + (0.55 * current_intensity);
-        let sun_b = 0.1 + (0.75 * current_intensity);
-        fog.directional_light_color = Color::srgba(sun_r, sun_g, sun_b, 0.15 * current_intensity);
-    }
-}
