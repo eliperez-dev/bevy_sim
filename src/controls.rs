@@ -25,7 +25,7 @@ pub enum FlightMode {
 impl Default for ControlMode {
     fn default() -> Self {
         Self {
-            mode: FlightMode::FreeFlight,
+            mode: FlightMode::Aircraft,
         }
     }
 }

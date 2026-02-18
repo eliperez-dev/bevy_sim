@@ -158,7 +158,7 @@ fn setup(
     let cascade_shadow_config = CascadeShadowConfigBuilder::default().build();
 
     // World Generator
-    commands.insert_resource(WorldGenerator::new(0));
+    commands.insert_resource(WorldGenerator::new(rand::random::<u32>()));
     
     // Shared materials for chunks
     commands.insert_resource(SharedChunkMaterials {
@@ -209,7 +209,7 @@ fn setup(
         Aircraft {
             speed: 230.0,
         },
-        Transform::from_xyz(0.0, 300.0, 0.0).with_scale(Vec3::splat(0.1)),
+        Transform::from_xyz(0.0, 700.0, 0.0).with_scale(Vec3::splat(0.1)),
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();
@@ -257,7 +257,7 @@ fn setup_camera_fog(mut commands: Commands) {
             falloff: FogFalloff::ExponentialSquared{ 
                 // Tweak this number to make the fog thicker/thinner globally
                 // Higher number = thicker fog closer to the camera
-                density: 0.00001, 
+                density: 0.000040, 
             },
         }, 
         AmbientLight {
