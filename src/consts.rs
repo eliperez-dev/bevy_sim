@@ -10,7 +10,7 @@ pub const TERRAIN_SMOOTHNESS: f32 = 0.0;
 pub const COMPUTE_SMOOTH_NORMALS: bool = false;
 
 pub const RENDER_DISTANCE: i32 = 20;
-pub const MAX_CHUNKS_PER_FRAME: usize = 200;
+pub const MAX_CHUNKS_PER_FRAME: usize = 30;
 
 pub const MAX_ILLUMANENCE: f32 = 7_300.0;
 

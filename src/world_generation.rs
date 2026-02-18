@@ -282,29 +282,52 @@ pub fn modify_plane(
 
 pub fn handle_compute_tasks(
     mut commands: Commands,
-    mut tasks: Query<(Entity, &Mesh3d, &mut ChunkTask)>,
+    mut tasks: Query<(Entity, &Mesh3d, &mut ChunkTask, &Chunk)>,
     mut meshes: ResMut<Assets<Mesh>>,
+    camera: Query<&Transform, With<MainCamera>>,
+    settings: Res<WorldGenerationSettings>,
 ) {
-    for (entity, mesh_handle, mut task) in &mut tasks {
-        if let Some(new_mesh) = future::block_on(future::poll_once(&mut task.task)) {
-            if let Some(new_handle) = task.new_handle.take() {
-                // LOD update case: Update the NEW mesh and then swap it onto the entity
-                if let Some(mesh) = meshes.get_mut(&new_handle) {
-                    *mesh = new_mesh;
-                }
-                commands.entity(entity).insert(Mesh3d(new_handle));
-                
-                // Now we can safely remove the old mesh
-                meshes.remove(mesh_handle);
-            } else {
-                // Initial generation case: Update the current mesh in-place
-                if let Some(mesh) = meshes.get_mut(mesh_handle) {
-                    *mesh = new_mesh;
-                }
-            }
+    let cam_transform = camera.single().unwrap().translation;
+    let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
+    let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
-            // Remove the task component
-            commands.entity(entity).remove::<ChunkTask>();
+    let mut task_priorities: Vec<(Entity, f32)> = tasks
+        .iter()
+        .map(|(entity, _, _, chunk)| {
+            let dx = (chunk.x - cam_x) as f32;
+            let dz = (chunk.z - cam_z) as f32;
+            let distance_sq = dx * dx + dz * dz;
+            (entity, distance_sq)
+        })
+        .collect();
+
+    task_priorities.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+    let mut processed_count = 0;
+    
+    for (entity, _distance) in task_priorities {
+        if processed_count >= settings.max_chunks_per_frame {
+            break;
+        }
+
+        if let Ok((entity, mesh_handle, mut task, _chunk)) = tasks.get_mut(entity) {
+            if let Some(new_mesh) = future::block_on(future::poll_once(&mut task.task)) {
+                if let Some(new_handle) = task.new_handle.take() {
+                    if let Some(mesh) = meshes.get_mut(&new_handle) {
+                        *mesh = new_mesh;
+                    }
+                    commands.entity(entity).insert(Mesh3d(new_handle));
+                    meshes.remove(mesh_handle);
+                } else {
+                    if let Some(mesh) = meshes.get_mut(mesh_handle) {
+                        *mesh = new_mesh;
+                    }
+                }
+
+                commands.entity(entity).remove::<ChunkTask>();
+                commands.entity(entity).insert(Visibility::Visible);
+                processed_count += 1;
+            }
         }
     }
 }
@@ -448,6 +471,7 @@ pub fn generate_chunks(
                 MeshMaterial3d(shared_materials.terrain_material.clone()),
                 Transform::from_xyz(x_pos, 0.0, z_pos),
                 Chunk { x, z, current_lod: lod },
+                Visibility::Hidden,
             )).with_children(|parent| {
                 parent.spawn((
                     Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE).subdivisions(1))),

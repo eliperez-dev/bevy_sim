@@ -7,6 +7,7 @@ use bevy::{
     render::{RenderPlugin, settings::{WgpuFeatures, WgpuSettings}},
     dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
     camera::ClearColorConfig,
+    window::{PresentMode, WindowPlugin},
 };
 
 
@@ -26,15 +27,23 @@ mod controls;
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins.set(RenderPlugin {
-                render_creation: WgpuSettings {
-                    // WARN this is a native only feature. It will not work with webgl or webgpu
-                    features: WgpuFeatures::POLYGON_MODE_LINE,
+            DefaultPlugins
+                .set(RenderPlugin {
+                    render_creation: WgpuSettings {
+                        // WARN this is a native only feature. It will not work with webgl or webgpu
+                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    }
+                    .into(),
                     ..default()
-                }
-                .into(),
-                ..default()
-            }),
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        present_mode: PresentMode::AutoVsync,
+                        ..default()
+                    }),
+                    ..default()
+                }),
             // You need to add this plugin to enable wireframe rendering
             WireframePlugin::default(),
             FpsOverlayPlugin {
@@ -52,14 +61,14 @@ fn main() {
                     // We can also change color of the overlay
                     text_color: Color::srgb(0.0, 1.0, 0.0),
                     // We can also set the refresh interval for the FPS counter
-                    refresh_interval: core::time::Duration::from_millis(100),
+                    refresh_interval: core::time::Duration::from_millis(500),
                     enabled: true,
                     frame_time_graph_config: FrameTimeGraphConfig {
                         enabled: true,
                         // The minimum acceptable fps
-                        min_fps: 30.0,
+                        min_fps: 20.0,
                         // The target fps
-                        target_fps: 144.0,
+                        target_fps: 60.0,
                     },
                 },
             },
@@ -311,7 +320,7 @@ fn ui_example_system(
 
         if let Ok(mut fog) = fog_query.single_mut() {
             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
-                ui.add(egui::Slider::new(density, 0.000005..=0.00005).text("Fog Density"));
+                ui.add(egui::Slider::new(density, 0.000005..=0.001).text("Fog Density").logarithmic(true));
             }
         }
 
