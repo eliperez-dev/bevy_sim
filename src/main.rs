@@ -109,7 +109,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup_camera_system)
         .add_systems(EguiPrimaryContextPass, ui_example_system)
-        .add_systems(Startup, (setup, setup_camera_fog).chain())
+        .add_systems(Startup, (setup, setup_camera_fog, spawn_stars).chain())
         .add_systems(Update, (
             camera_controls, 
             update_debugger, 

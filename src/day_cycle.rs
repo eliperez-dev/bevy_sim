@@ -11,6 +11,12 @@ pub struct DayNightCycle {
 #[derive(Component)]
 pub struct Sun;
 
+#[derive(Component)]
+pub struct Star {
+    pub offset: Vec3,
+    pub brightness: f32,
+}
+
 pub fn update_daylight_cycle(
     time: Res<Time>,
     mut cycle: ResMut<DayNightCycle>,
@@ -19,6 +25,8 @@ pub fn update_daylight_cycle(
     mut env_query: Query<(&mut DistanceFog, &mut AmbientLight)>, 
     camera_query: Query<&Transform, (With<MainCamera>, Without<Sun>)>,
     chunk_manager: Res<ChunkManager>,
+    mut star_query: Query<(&Star, &mut Transform, &MeshMaterial3d<StandardMaterial>), (Without<MainCamera>, Without<Sun>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     cycle.time_of_day = (cycle.time_of_day + cycle.speed * time.delta_secs()) % 1.0;
 
@@ -30,18 +38,15 @@ pub fn update_daylight_cycle(
 
     // 2. Inclination rotation
     let tilt_rotation = Quat::from_rotation_z(cycle.inclination);
+    
+    let final_rotation = tilt_rotation * orbit_rotation;
+    let sun_dir = final_rotation.mul_vec3(Vec3::NEG_Z);
+    let up_dot = sun_dir.dot(Vec3::NEG_Y);
+    let daylight = ((up_dot + 0.1) * 5.0).clamp(0.0, 1.0);
         
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
 
-        transform.rotation = tilt_rotation * orbit_rotation;
-
-        let sun_dir = transform.forward().as_vec3();
-        
-        // Dot product with straight down. 1.0 = noon, 0.0 = horizon, -1.0 = midnight
-        let up_dot = sun_dir.dot(Vec3::NEG_Y); 
-
-        // 0.0 = Night, 1.0 = Day
-        let daylight = ((up_dot + 0.1) * 5.0).clamp(0.0, 1.0); 
+        transform.rotation = final_rotation; 
         
         let horizon_factor = (1.0 - (up_dot.abs() / 0.40)).clamp(0.0, 1.0);
 
@@ -80,5 +85,63 @@ pub fn update_daylight_cycle(
             let scale_factor = 0.1 * chunk_manager.render_distance as f32;
             transform.scale = Vec3::splat(scale_factor);
         }
+    }
+
+    if let Ok(camera_transform) = camera_query.single() {
+        let star_alpha = ((-up_dot - 0.2) / 0.6).clamp(0.0, 1.0);
+        let base_star_brightness = star_alpha * 10.0;
+        let star_distance = CHUNK_SIZE * chunk_manager.render_distance as f32;
+        let scale_factor = 0.2 * chunk_manager.render_distance as f32;
+        
+        for (star, mut star_transform, material_handle) in star_query.iter_mut() {
+            let star_rotation = final_rotation * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+            let rotated_offset = star_rotation.mul_vec3(-star.offset);
+            star_transform.translation = camera_transform.translation + rotated_offset * star_distance;
+            star_transform.scale = Vec3::splat(scale_factor * star.brightness);
+            
+            if let Some(material) = materials.get_mut(&material_handle.0) {
+                let star_brightness = base_star_brightness * star.brightness;
+                material.base_color = Color::srgba(1.0, 1.0, 1.0, star_alpha);
+                material.emissive = LinearRgba::rgb(star_brightness, star_brightness, star_brightness);
+            }
+        }
+    }
+}
+
+pub fn spawn_stars(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let num_stars = 300;
+
+    for _ in 0..num_stars {
+        let phi = rand::random::<f32>() * std::f32::consts::TAU;
+        let theta = rand::random::<f32>() * std::f32::consts::PI;
+        
+        let x = theta.sin() * phi.cos();
+        let y = theta.cos();
+        let z = theta.sin() * phi.sin();
+
+        let offset = Vec3::new(x, y, z).normalize();
+        let brightness = 0.7 + rand::random::<f32>() * 0.5;
+
+        let star_mesh = meshes.add(Sphere::new(4.0 + brightness * 2.0));
+
+        let star_material = materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 1.0, 1.0, 0.0),
+            emissive: LinearRgba::rgb(10.1, 10.1, 10.1),
+            alpha_mode: AlphaMode::Blend,
+            fog_enabled: false,
+            ..default()
+        });
+
+        commands.spawn((
+            Mesh3d(star_mesh),
+            MeshMaterial3d(star_material),
+            Transform::default(),
+            bevy::camera::visibility::NoFrustumCulling,
+            Star { offset, brightness },
+        ));
     }
 }
