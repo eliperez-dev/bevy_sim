@@ -84,6 +84,9 @@ fn main() {
             to_spawn: Vec::new(),
             lod_to_update: Vec::new(),
             render_distance: RENDER_DISTANCE,
+            lod_levels: LOD_LEVELS,
+            lod_quality_multiplier: 1,
+            lod_distance_multiplier: 1.0,
         })
         .insert_resource(RenderSettings {
             cascades: 0,
@@ -312,17 +315,28 @@ fn ui_example_system(
         // Global Wireframe Toggle
         ui.checkbox(&mut wireframe_config.global, "Global Wireframe");
 
-        ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance"));
+        if ui.add(egui::Slider::new(&mut chunk_manager.render_distance,2..=150).text("Render Distance")).changed() {
+            render_settings.just_updated = true;
+        }
+
         ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=500).text("Max Chunks / Frame"));
+
         if ui.add(egui::Slider::new(&mut render_settings.cascades, 0..=4).text("Cascades")).changed() {
             render_settings.just_updated = true;
         }
 
-        if let Ok(mut fog) = fog_query.single_mut() {
-            if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
+        if ui.add(egui::Slider::new(&mut chunk_manager.lod_quality_multiplier, 1..=4).text("LOD Quality")).changed() {
+            render_settings.just_updated = true;
+        }
+
+        if ui.add(egui::Slider::new(&mut chunk_manager.lod_distance_multiplier, 1.0..=20.0).text("LOD Distance")).changed() {
+            render_settings.just_updated = true;
+        }
+
+        if let Ok(mut fog) = fog_query.single_mut()
+            && let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
                 ui.add(egui::Slider::new(density, 0.000005..=0.001).text("Fog Density").logarithmic(true));
             }
-        }
 
         if ui.button("Reset Simulation").clicked() {
             day_cycle.time_of_day = 0.5;
@@ -335,6 +349,7 @@ fn draw_lod_rings(
     mut gizmos: Gizmos,
     query: Query<&GlobalTransform, With<MainCamera>>,
     wire_frame: Res<WireframeConfig>,
+    chunk_manager: Res<ChunkManager>,
 ) {
     if !wire_frame.global {
         return;
@@ -342,13 +357,13 @@ fn draw_lod_rings(
     let Ok(transform) = query.single() else { return };
     let translation = transform.translation();
 
-    for (distance, _) in LOD_LEVELS {
+    for (distance, _) in chunk_manager.lod_levels {
         gizmos.circle(
             Isometry3d::new(
                 Vec3::new(translation.x, MAP_HEIGHT_SCALE * 10.0 / 3.0, translation.z), 
                 Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
             ),
-            distance * CHUNK_SIZE,
+            distance * CHUNK_SIZE * chunk_manager.lod_distance_multiplier,
             Color::srgb(1.0, 0.0, 0.0),
         );
     }

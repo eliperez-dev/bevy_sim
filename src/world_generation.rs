@@ -11,7 +11,7 @@ use bevy::{
     prelude::*
 };
 
-use crate::consts::*;
+use crate::{RenderSettings, consts::*};
 use crate::controls::MainCamera;
 
 #[derive(Component)]
@@ -23,6 +23,7 @@ pub fn _animate_water_cpu(
     water_query: Query<(&Mesh3d, &GlobalTransform, &ChildOf), With<WaterChunk>>, 
     // 2. Query to read the terrain chunk's data
     chunk_query: Query<&Chunk>, 
+    chunk_manager: Res<ChunkManager>,
 ) {
     let t = time.elapsed_secs();
     
@@ -31,9 +32,9 @@ pub fn _animate_water_cpu(
     let speed = 1.5;
 
     // Grab the subdivision count of your highest fidelity LOD.
-    // Assuming LOD_LEVELS is sorted nearest-to-farthest, index 0 is your highest LOD.
+    // Assuming chunk_manager.lod_levels is sorted nearest-to-farthest, index 0 is your highest LOD.
     // (e.g., if your highest LOD is 64 subdivisions, this evaluates to 64)
-    let highest_lod = LOD_LEVELS[0].1; 
+    let highest_lod = chunk_manager.lod_levels[0].1; 
 
     for (mesh_handle, global_transform, parent) in water_query.iter() {
         
@@ -43,8 +44,8 @@ pub fn _animate_water_cpu(
         // Is this the highest LOD chunk?
         let is_high_fidelity = chunk.current_lod == highest_lod;
 
-        if let Some(mesh) = meshes.get_mut(mesh_handle) {
-            if let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+        if let Some(mesh) = meshes.get_mut(mesh_handle)
+            && let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
                 
                 let chunk_world_pos = global_transform.translation();
 
@@ -65,7 +66,6 @@ pub fn _animate_water_cpu(
                     }
                 }
             }
-        }
     }
 }
 
@@ -310,25 +310,22 @@ pub fn handle_compute_tasks(
             break;
         }
 
-        if let Ok((entity, mesh_handle, mut task, _chunk)) = tasks.get_mut(entity) {
-            if let Some(new_mesh) = future::block_on(future::poll_once(&mut task.task)) {
+        if let Ok((entity, mesh_handle, mut task, _chunk)) = tasks.get_mut(entity)
+            && let Some(new_mesh) = future::block_on(future::poll_once(&mut task.task)) {
                 if let Some(new_handle) = task.new_handle.take() {
                     if let Some(mesh) = meshes.get_mut(&new_handle) {
                         *mesh = new_mesh;
                     }
                     commands.entity(entity).insert(Mesh3d(new_handle));
                     meshes.remove(mesh_handle);
-                } else {
-                    if let Some(mesh) = meshes.get_mut(mesh_handle) {
-                        *mesh = new_mesh;
-                    }
+                } else if let Some(mesh) = meshes.get_mut(mesh_handle) {
+                    *mesh = new_mesh;
                 }
 
                 commands.entity(entity).remove::<ChunkTask>();
                 commands.entity(entity).insert(Visibility::Visible);
                 processed_count += 1;
             }
-        }
     }
 }
 
@@ -346,6 +343,9 @@ pub struct ChunkManager {
     pub to_spawn: Vec<(i32, i32)>,
     pub lod_to_update: Vec<Entity>,
     pub render_distance: i32,
+    pub lod_levels: [(f32, u32); 4],
+    pub lod_quality_multiplier: u32,
+    pub lod_distance_multiplier: f32,
 }
 
 #[derive(Resource)]
@@ -354,16 +354,16 @@ pub struct SharedChunkMaterials {
     pub water_material: Handle<StandardMaterial>,
 }
 
-fn get_lod_subdivisions(distance_sq: f32) -> u32 {
+fn get_lod_subdivisions(distance_sq: f32, chunk_manager: &ChunkManager) -> u32 {
     let distance = distance_sq.sqrt();
     
-    for (max_distance, subdivisions) in LOD_LEVELS.iter() {
-        if distance <= *max_distance {
-            return *subdivisions;
+    for (max_distance, subdivisions) in chunk_manager.lod_levels.iter() {
+        if distance <= *max_distance * chunk_manager.lod_distance_multiplier{
+            return *subdivisions * chunk_manager.lod_quality_multiplier;
         }
     }
     
-    LOD_LEVELS.last().unwrap().1
+    chunk_manager.lod_levels.last().unwrap().1 * chunk_manager.lod_quality_multiplier
 }
 
 #[derive(Resource)]
@@ -460,7 +460,7 @@ pub fn generate_chunks(
             
             let x_pos = x as f32 * CHUNK_SIZE;
             let z_pos = z as f32 * CHUNK_SIZE;
-            let lod = get_lod_subdivisions(distance_sq);
+            let lod = get_lod_subdivisions(distance_sq, &chunk_manager);
             
             commands.spawn((
                 Mesh3d(meshes.add(
@@ -495,14 +495,17 @@ pub fn update_chunk_lod(
     mut chunk_manager: ResMut<ChunkManager>,
     mut last_cam_pos: Local<Option<(i32, i32)>>,
     settings: Res<WorldGenerationSettings>,
-    water_query: Query<(Entity, &Mesh3d), With<WaterChunk>>,
+    mut render_settings: ResMut<RenderSettings>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
     // Only re-scan all chunks for LOD changes when the camera moves to a new chunk
-    if *last_cam_pos != Some((cam_x, cam_z)) {
+    if *last_cam_pos != Some((cam_x, cam_z)) ||
+    render_settings.just_updated
+     {
+        render_settings.just_updated = false;
         *last_cam_pos = Some((cam_x, cam_z));
         
         let mut candidates = Vec::new();
@@ -510,7 +513,7 @@ pub fn update_chunk_lod(
             let dx = (chunk.x - cam_x) as f32;
             let dz = (chunk.z - cam_z) as f32;
             let distance_sq = dx * dx + dz * dz;
-            let desired_lod = get_lod_subdivisions(distance_sq);
+            let desired_lod = get_lod_subdivisions(distance_sq, &chunk_manager);
             
             if desired_lod != chunk.current_lod {
                 candidates.push((entity, distance_sq));
@@ -529,11 +532,11 @@ pub fn update_chunk_lod(
     while processed_count < settings.max_chunks_per_frame && !chunk_manager.lod_to_update.is_empty() {
         let entity = chunk_manager.lod_to_update.remove(0);
 
-        if let Ok((entity, chunk, _mesh_handle, transform, children)) = chunks.get_mut(entity) {
+        if let Ok((entity, chunk, _mesh_handle, transform, _children)) = chunks.get_mut(entity) {
             let dx = (chunk.x - cam_x) as f32;
             let dz = (chunk.z - cam_z) as f32;
             let distance_sq = dx * dx + dz * dz; 
-            let desired_lod = get_lod_subdivisions(distance_sq);
+            let desired_lod = get_lod_subdivisions(distance_sq, &chunk_manager);
 
 
             // Double check if it still needs an update (might have been updated by another frame's scan)
