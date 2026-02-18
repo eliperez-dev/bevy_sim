@@ -39,12 +39,13 @@ pub fn update_daylight_cycle(
     let final_rotation = tilt_rotation * orbit_rotation;
     let sun_dir = final_rotation.mul_vec3(Vec3::NEG_Z);
     let up_dot = sun_dir.dot(Vec3::NEG_Y);
+    
     let daylight = ((up_dot + 0.1) * 5.0).clamp(0.0, 1.0);
         
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
         transform.rotation = final_rotation; 
         
-        let horizon_factor = (1.0 - (up_dot.abs() / 0.40)).clamp(0.0, 1.0);
+        let horizon_factor = (1.0 - (up_dot.abs() / 0.30)).clamp(0.0, 1.0);
         light.illuminance = daylight * MAX_ILLUMANENCE;
 
         if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
@@ -73,32 +74,49 @@ pub fn update_daylight_cycle(
     }
 
     if let Ok(camera_transform) = camera_query.single() {
-        let star_alpha = ((-up_dot - 0.2) / 0.6).clamp(0.0, 1.0);
-        let base_star_brightness = star_alpha * 10.0;
+        let global_star_visibility = ((-up_dot - 0.2) / 0.6).clamp(0.0, 1.0);
+        
         let star_distance = CHUNK_SIZE * chunk_manager.render_distance as f32;
         let scale_factor = 0.2 * chunk_manager.render_distance as f32;
-        
-        for (star, mut star_transform, material_handle) in star_query.iter_mut() {
-            // Combine a slow wave and a fast wave
-            let slow_wave = (time.elapsed_secs() * star.twinkle_speed + star.phase).sin();
-            let fast_wave = (time.elapsed_secs() * star.twinkle_speed * 2.5 + star.phase * 0.5).sin();
+        let base_star_brightness = 10.0; 
 
-            // Mix them (70% slow, 30% fast) and normalize to a range around 1.0
-            let noise = (slow_wave * 0.7) + (fast_wave * 0.3);
-            let twinkle = noise * 0.65 + 1.0;
+        if global_star_visibility > 0.0 {
+            for (star, mut star_transform, material_handle) in star_query.iter_mut() {
+                let star_rotation = final_rotation * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+                let current_star_dir = star_rotation.mul_vec3(-star.offset).normalize(); 
+                
+                let star_elevation = current_star_dir.dot(Vec3::Y);
+                let horizon_fade = ((star_elevation + 0.05) / 0.30).clamp(0.0, 1.0);
+                let final_alpha = global_star_visibility * horizon_fade;
 
-            let star_rotation = final_rotation * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
-            let rotated_offset = star_rotation.mul_vec3(-star.offset);
-            
-            star_transform.translation = camera_transform.translation + rotated_offset * star_distance;
-            
-            // We can also scale the star slightly with the twinkle for a more "blooming" effect
-            star_transform.scale = Vec3::splat(scale_factor * star.brightness * (twinkle * 0.2 + 0.8));
-            
-            if let Some(material) = materials.get_mut(material_handle) {
-                let final_brightness = base_star_brightness * star.brightness * twinkle;
-                material.base_color = Color::srgba(1.0, 1.0, 1.0, star_alpha);
-                material.emissive = LinearRgba::rgb(final_brightness, final_brightness, final_brightness);
+                if final_alpha > 0.001 {
+                    star_transform.translation = camera_transform.translation + current_star_dir * star_distance;
+
+                    let t = time.elapsed_secs() * star.twinkle_speed;
+                    let wave1 = (t + star.phase).sin();
+                    let wave2 = (t * 2.7 + star.phase * 1.5).sin();
+                    let noise = (wave1 * 0.7) + (wave2 * 0.3);
+                    let twinkle = noise * 0.4 + 1.0;
+
+                    star_transform.scale = Vec3::splat(scale_factor * star.brightness * (twinkle * 0.2 + 0.8));
+
+                    if let Some(material) = materials.get_mut(material_handle) {
+                        let final_brightness = base_star_brightness * star.brightness * twinkle;
+                        
+                        material.base_color = Color::srgba(1.0, 1.0, 1.0, final_alpha);
+                        material.emissive = LinearRgba::rgb(
+                            final_brightness * final_alpha, 
+                            final_brightness * final_alpha, 
+                            final_brightness * final_alpha
+                        );
+                    }
+                } else {
+                    star_transform.scale = Vec3::ZERO;
+                }
+            }
+        } else {
+            for (_, mut star_transform, _) in star_query.iter_mut() {
+                star_transform.scale = Vec3::ZERO;
             }
         }
     }
