@@ -9,6 +9,7 @@ futures-lite = "2.6.1"
 noise = "0.9.0"
 
 bevy_egui = "0.39.1" # Check for the version matching your Bevy version
+bevy_water = "0.18.1"
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

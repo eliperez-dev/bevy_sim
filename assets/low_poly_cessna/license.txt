@@ -1,0 +1,11 @@
+Model Information:
+* title:	Low Poly Cessna
+* source:	https://sketchfab.com/3d-models/low-poly-cessna-af851f608b754bea81b6ca4c523f9b1f
+* author:	noagon (https://sketchfab.com/noagon)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Low Poly Cessna" (https://sketchfab.com/3d-models/low-poly-cessna-af851f608b754bea81b6ca4c523f9b1f) by noagon (https://sketchfab.com/noagon) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

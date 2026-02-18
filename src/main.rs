@@ -171,11 +171,11 @@ fn setup(
         Sun, 
     ));
 
-    // Tree
+    // Plane
     commands.spawn((
         // The "#Scene0" points to the default scene inside the glTF file
-        SceneRoot(asset_server.load("tree.gltf#Scene0")), 
-        Transform::from_xyz(0.0, 55.0, 0.0), // Position it where you want
+        SceneRoot(asset_server.load("low_poly_cessna/scene.gltf#Scene0")), 
+        Transform::from_xyz(0.0, 300.0, 0.0).with_scale(Vec3::splat(10.0)), // Position it where you want
     ));
     
     // UI
@@ -198,7 +198,7 @@ fn setup_camera_fog(mut commands: Commands) {
             ..default()
         }),
         MainCamera,
-        Transform::from_xyz(-50.0, 100.0, 50.0).looking_at(Vec3::new(0.0, 80.0, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, 4000.0, 0.0).looking_at(Vec3::new(5000.0, 3000.0, 5000.0), Vec3::Y),
         DistanceFog {
             // The base "thick" color of the fog
             color: Color::srgba(0.35, 0.48, 0.66, 1.0), 
@@ -275,7 +275,7 @@ fn ui_example_system(
         ui.checkbox(&mut wireframe_config.global, "Global Wireframe");
 
         ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance"));
-        ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=250).text("Max Chunks / Frame"));
+        ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=500).text("Max Chunks / Frame"));
 
         if let Ok(mut fog) = fog_query.single_mut() {
             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
