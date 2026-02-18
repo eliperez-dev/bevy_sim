@@ -90,17 +90,19 @@ fn main() {
         .add_systems(Startup, (setup, setup_camera_fog).chain())
         .add_systems(Update, (
             camera_controls, 
-            camera_follow_aircraft.after(camera_controls),
             update_debugger, 
             generate_chunks, 
             modify_plane, 
             handle_compute_tasks, 
             update_chunk_lod, 
-            update_daylight_cycle.after(camera_controls),
+            update_daylight_cycle,
             draw_lod_rings,
             //animate_water_cpu,
         ))
-        .add_systems(PostUpdate, despawn_out_of_bounds_chunks)
+        .add_systems(PostUpdate, (
+            despawn_out_of_bounds_chunks,
+            camera_follow_aircraft,
+        ))
         .run();
 }
 
@@ -179,7 +181,9 @@ fn setup(
 
     // 1. Create a "parent" entity for the physics/logic
     let plane_entity = commands.spawn((
-        Aircraft,
+        Aircraft {
+            speed: 230.0,
+        },
         Transform::from_xyz(0.0, 300.0, 0.0).with_scale(Vec3::splat(1.0)),
         Visibility::default(),
         InheritedVisibility::default(),
