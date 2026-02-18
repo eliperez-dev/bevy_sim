@@ -47,7 +47,7 @@ pub fn animate_water_cpu(
                 
                 let chunk_world_pos = global_transform.translation();
 
-                for pos in positions.iter_mut() {
+                for pos in positions.iter_mut() { 
                     if is_high_fidelity {
                         // Do the expensive trig math for nearby chunks
                         let world_x = pos[0] + chunk_world_pos.x;
@@ -458,7 +458,7 @@ pub fn update_chunk_lod(
         *last_cam_pos = Some((cam_x, cam_z));
         
         let mut candidates = Vec::new();
-        for (entity, chunk, _, _, children) in &chunks {
+        for (entity, chunk, _, _, _children) in &chunks {
             let dx = (chunk.x - cam_x) as f32;
             let dz = (chunk.z - cam_z) as f32;
             let distance_sq = dx * dx + dz * dz;
@@ -484,7 +484,7 @@ pub fn update_chunk_lod(
         if let Ok((entity, chunk, _mesh_handle, transform, children)) = chunks.get_mut(entity) {
             let dx = (chunk.x - cam_x) as f32;
             let dz = (chunk.z - cam_z) as f32;
-            let distance_sq = dx * dx + dz * dz;
+            let distance_sq = dx * dx + dz * dz; 
             let desired_lod = get_lod_subdivisions(distance_sq);
 
 
@@ -562,7 +562,7 @@ pub fn update_chunk_lod(
                 commands.entity(entity).insert(ChunkTask { task, new_handle: Some(new_mesh_handle) });
                 
                 // Finalize the chunk's LOD state
-                if let Ok((_, mut chunk, _, _, children)) = chunks.get_mut(entity) {
+                if let Ok((_, mut chunk, _, _, _children)) = chunks.get_mut(entity) {
                     chunk.current_lod = desired_lod;
                 }
                 processed_count += 1;
@@ -590,7 +590,7 @@ pub fn despawn_out_of_bounds_chunks(
     for (entity, chunk) in &chunks {
         let dx = (chunk.x - cam_x) as f32;
         let dz = (chunk.z - cam_z) as f32;
-        let distance_sq = dx * dx + dz * dz;
+        let distance_sq = dx * dx + dz * dz; 
 
         if distance_sq > despawn_distance_sq {
             chunks_to_despawn.push((entity, chunk.x, chunk.z, distance_sq));

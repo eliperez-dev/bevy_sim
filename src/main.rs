@@ -83,12 +83,14 @@ fn main() {
             speed: 0.025,  
             inclination: -0.8,     
         })
+        .init_resource::<ControlMode>()
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup_camera_system)
         .add_systems(EguiPrimaryContextPass, ui_example_system)
         .add_systems(Startup, (setup, setup_camera_fog).chain())
         .add_systems(Update, (
             camera_controls, 
+            camera_follow_aircraft.after(camera_controls),
             update_debugger, 
             generate_chunks, 
             modify_plane, 
@@ -96,7 +98,7 @@ fn main() {
             update_chunk_lod, 
             update_daylight_cycle.after(camera_controls),
             draw_lod_rings,
-            animate_water_cpu,
+            //animate_water_cpu,
         ))
         .add_systems(PostUpdate, despawn_out_of_bounds_chunks)
         .run();
@@ -139,7 +141,7 @@ fn setup(
             ..default()
         }),
         water_material: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.15, 0.35, 0.7, 0.9),
+            base_color: Color::srgba(0.15, 0.35, 0.7, 0.90),
             alpha_mode: AlphaMode::Blend,
             perceptual_roughness: 0.1,
             metallic: 0.1,
@@ -173,13 +175,26 @@ fn setup(
         Sun, 
     ));
 
-    // Plane
-    commands.spawn((
-        // The "#Scene0" points to the default scene inside the glTF file
-        SceneRoot(asset_server.load("low_poly_cessna/scene.gltf#Scene0")), 
-        Transform::from_xyz(0.0, 300.0, 0.0).with_scale(Vec3::splat(10.0)), // Position it where you want
-    ));
-    
+    // --- Replace this block in setup() ---
+
+    // 1. Create a "parent" entity for the physics/logic
+    let plane_entity = commands.spawn((
+        Aircraft,
+        Transform::from_xyz(0.0, 300.0, 0.0).with_scale(Vec3::splat(1.0)),
+        Visibility::default(),
+        InheritedVisibility::default(),
+    )).id();
+
+    // 2. Spawn the GLTF model as a child with a corrective rotation
+    let model_correction = commands.spawn(SceneRoot(
+        asset_server.load("low-poly_airplane/scene.gltf#Scene0")
+    )).insert(Transform::from_rotation(
+        // Rotate 180 degrees on Y to face the right way (-Z)
+        // Tweak the 2.0 degrees to fix your "slightly to the left" issue
+        Quat::from_rotation_y((180.0f32).to_radians()) 
+    )).id();
+
+    commands.entity(plane_entity).add_child(model_correction);
     // UI
     commands.spawn((Text::new("Pos: N/A" ),
         Node {
@@ -232,6 +247,7 @@ fn update_debugger(
     world: Res<WorldGenerator>,
     chunks: Res<ChunkManager>,
     cycle: Res<DayNightCycle>,
+    control_mode: Res<ControlMode>,
     mut debugger: Query<&mut Text, With<Debugger>>,
 ) {
     let cam_trans = camera.single().unwrap().translation;
@@ -243,10 +259,11 @@ fn update_debugger(
 
     message.clear();
 
+    message.push_str(&format!("Mode: {:?} (Press F to toggle)\n", control_mode.mode));
     message.push_str(&format!("Position: [{:.2}, {:.2}, {:.2}]\n", cam_trans.x, cam_trans.y, cam_trans.z));
     message.push_str(&format!("Biome: {:?} Climate: {:?}\n", biome, climate));
-    message.push_str(&format!("Chunks: {:?}\n", chunks.spawned_chunks.len())); // Added newline here
-    message.push_str(&format!("Time of Day: {:.2}\n", cycle.time_of_day)); // <-- Added daylight info
+    message.push_str(&format!("Chunks: {:?}\n", chunks.spawned_chunks.len()));
+    message.push_str(&format!("Time of Day: {:.2}\n", cycle.time_of_day)); 
 }
 
 fn ui_example_system(
