@@ -206,9 +206,7 @@ fn setup(
 
     // 1. Create a "parent" entity for the physics/logic
     let plane_entity = commands.spawn((
-        Aircraft {
-            speed: 230.0,
-        },
+        Aircraft::default(),
         Transform::from_xyz(0.0, 700.0, 0.0).with_scale(Vec3::splat(0.1)),
         Visibility::default(),
         InheritedVisibility::default(),
