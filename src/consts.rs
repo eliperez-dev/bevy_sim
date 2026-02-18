@@ -5,26 +5,8 @@ pub const OCEAN_THRESHOLD: f32 = 0.45;
 
 pub const CHUNK_SIZE: f32 = 1000.0; 
 pub const MAP_HEIGHT_SCALE: f32 = 230.0;
-pub const TERRAIN_SMOOTHNESS: f32 = 0.0;
-
-pub const COMPUTE_SMOOTH_NORMALS: bool = false;
-
-pub const RENDER_DISTANCE: i32 = 20;
-pub const MAX_CHUNKS_PER_FRAME: usize = 30;
 
 pub const MAX_ILLUMANENCE: f32 = 7_300.0;
-
-
-pub const LOD_LEVELS: [(f32, u32); 4] = [
-    (1.0 , 8),
-    (2.0, 4),
-    (4.0, 2),
-    (8.0, 1),
-];
-
-
-
-
 
 pub struct TerrainStop {
     pub height: f32,

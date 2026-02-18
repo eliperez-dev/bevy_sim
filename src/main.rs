@@ -83,14 +83,20 @@ fn main() {
             last_camera_chunk: None,
             to_spawn: Vec::new(),
             lod_to_update: Vec::new(),
-            render_distance: RENDER_DISTANCE,
-            lod_levels: LOD_LEVELS,
-            lod_quality_multiplier: 1,
-            lod_distance_multiplier: 1.0,
+            render_distance: 35,
+            lod_levels: [
+                (1.0 , 4),
+                (2.0, 2),
+                (3.0, 1),
+            ],
+            lod_quality_multiplier: 2,
+            lod_distance_multiplier: 15.0,
         })
         .insert_resource(RenderSettings {
             cascades: 0,
             just_updated: false,
+            terrain_smoothness: 0.0,
+            compute_smooth_normals: false,
         })
         .init_resource::<WorldGenerationSettings>()
         // Initialize the daylight cycle
@@ -126,6 +132,8 @@ fn main() {
 struct RenderSettings {
     cascades: usize,
     just_updated: bool,
+    terrain_smoothness: f32,
+    compute_smooth_normals: bool,
 }
 
 fn setup_camera_system(mut commands: Commands) {
@@ -297,6 +305,9 @@ fn ui_example_system(
     mut render_settings: ResMut<RenderSettings>,
 ) -> Result {
     egui::Window::new("Debugger").show(contexts.ctx_mut()?, |ui| {
+
+        render_settings.just_updated = false;
+
         ui.heading("Time Settings");
         
         // Sun Time Slider
@@ -324,12 +335,20 @@ fn ui_example_system(
         if ui.add(egui::Slider::new(&mut render_settings.cascades, 0..=4).text("Cascades")).changed() {
             render_settings.just_updated = true;
         }
+        
+        if ui.add(egui::Slider::new(&mut render_settings.terrain_smoothness, 0.0..=1.0).text("Terrain Smoothness")).changed() {
+            render_settings.just_updated = true;
+        }
 
+        if ui.checkbox(&mut render_settings.compute_smooth_normals, "Smooth Normals").changed() {
+            render_settings.just_updated = true;
+        }
+        
         if ui.add(egui::Slider::new(&mut chunk_manager.lod_quality_multiplier, 1..=4).text("LOD Quality")).changed() {
             render_settings.just_updated = true;
         }
 
-        if ui.add(egui::Slider::new(&mut chunk_manager.lod_distance_multiplier, 1.0..=20.0).text("LOD Distance")).changed() {
+        if ui.add(egui::Slider::new(&mut chunk_manager.lod_distance_multiplier, 1.0..=15.0).text("LOD Distance")).changed() {
             render_settings.just_updated = true;
         }
 

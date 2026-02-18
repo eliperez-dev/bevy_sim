@@ -50,19 +50,19 @@ pub fn update_daylight_cycle(
         
         // NEW: Horizon factor. Peaks at 1.0 when up_dot is 0.0, fades to 0.0 by +/- 0.25
         // Tweak the 0.25 to make the sunset phase last longer or shorter.
-        let horizon_factor = (1.0 - (up_dot.abs() / 0.35)).clamp(0.0, 1.0);
+        let horizon_factor = (1.0 - (up_dot.abs() / 0.40)).clamp(0.0, 1.0);
 
         // Apply lighting
         light.illuminance = daylight * MAX_ILLUMANENCE;
 
         // Update Environment
         if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
-            ambient.brightness = 6.0 + (daylight * 9.8); 
+            ambient.brightness = 10.0 + (daylight * 9.5); 
 
             // Simple Fog Color Lerp (using Vec3 for universally safe math)
             let night_fog = Vec3::new(0.1, 0.1, 0.2);
             let day_fog = Vec3::new(0.35, 0.48, 0.66);
-            let sunset_fog = Vec3::new(0.9, 0.45, 0.2); // An orange/pinkish hue
+            let sunset_fog = Vec3::new(0.90, 0.45, 0.2); // An orange/pinkish hue
             
             // 1. Interpolate between night and day like normal
             let base_fog = night_fog.lerp(day_fog, daylight);

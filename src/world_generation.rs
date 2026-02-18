@@ -225,6 +225,7 @@ pub fn modify_plane(
     query: Query<(Entity, &Mesh3d, &Transform), Added<Chunk>>,
     world_generator: Res<WorldGenerator>,
     meshes: Res<Assets<Mesh>>,
+    render_settings: Res<RenderSettings>,
 ) {
     let thread_pool = AsyncComputeTaskPool::get();
     for (entity, mesh_handle, transform) in &query {
@@ -232,6 +233,9 @@ pub fn modify_plane(
             let mut mesh_clone = mesh.clone();
             let world_gen = world_generator.clone();
             let transform_clone = *transform;
+
+            let smoothness = render_settings.terrain_smoothness;
+            let compute_smooth_normals = render_settings.compute_smooth_normals;
 
             let task = thread_pool.spawn(async move {
                 let mut colors: Vec<[f32; 4]> = Vec::new();
@@ -259,14 +263,14 @@ pub fn modify_plane(
                         let elevation_offset = get_biome_elevation_offset(temp, humidity);
 
                         let final_height = base_height * height_multiplier + elevation_offset;
-                        colors.push(get_terrain_color(final_height, temp, humidity));
+                        colors.push(get_terrain_color(final_height, temp, humidity, smoothness));
                         pos[1] = final_height * MAP_HEIGHT_SCALE;
                     }
                 }
                 
                 mesh_clone.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
 
-                if COMPUTE_SMOOTH_NORMALS {
+                if compute_smooth_normals {
                     mesh_clone.compute_smooth_normals();
                 } else {
                     mesh_clone.duplicate_vertices();
@@ -343,7 +347,7 @@ pub struct ChunkManager {
     pub to_spawn: Vec<(i32, i32)>,
     pub lod_to_update: Vec<Entity>,
     pub render_distance: i32,
-    pub lod_levels: [(f32, u32); 4],
+    pub lod_levels: [(f32, u32); 3],
     pub lod_quality_multiplier: u32,
     pub lod_distance_multiplier: f32,
 }
@@ -374,7 +378,7 @@ pub struct WorldGenerationSettings {
 impl Default for WorldGenerationSettings {
     fn default() -> Self {
         Self {
-            max_chunks_per_frame: MAX_CHUNKS_PER_FRAME,
+            max_chunks_per_frame: 50,
         }
     }
 }
@@ -388,7 +392,7 @@ pub fn generate_chunks(
     mut last_render_distance: Local<Option<i32>>,
     settings: Res<WorldGenerationSettings>,
     mut sun_query: Query<&mut CascadeShadowConfig, (With<crate::day_cycle::Sun>, Without<MainCamera>)>,
-    mut render_settings: ResMut<crate::RenderSettings>,
+    render_settings: ResMut<crate::RenderSettings>,
 ) {
     let mut cascade = sun_query.single_mut().unwrap();
 
@@ -402,7 +406,6 @@ pub fn generate_chunks(
     *last_render_distance != Some(chunk_manager.render_distance) ||
     render_settings.just_updated
     {
-        render_settings.just_updated = false;
         chunk_manager.last_camera_chunk = Some((cam_x, cam_z));
         *last_render_distance = Some(chunk_manager.render_distance);
         
@@ -495,7 +498,7 @@ pub fn update_chunk_lod(
     mut chunk_manager: ResMut<ChunkManager>,
     mut last_cam_pos: Local<Option<(i32, i32)>>,
     settings: Res<WorldGenerationSettings>,
-    mut render_settings: ResMut<RenderSettings>,
+    render_settings: ResMut<RenderSettings>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
@@ -505,7 +508,6 @@ pub fn update_chunk_lod(
     if *last_cam_pos != Some((cam_x, cam_z)) ||
     render_settings.just_updated
      {
-        render_settings.just_updated = false;
         *last_cam_pos = Some((cam_x, cam_z));
         
         let mut candidates = Vec::new();
@@ -556,6 +558,9 @@ pub fn update_chunk_lod(
                 let world_gen = world_generator.clone();
                 let transform_clone = *transform;
 
+                let smoothness = render_settings.terrain_smoothness;
+                let compute_smooth_normals = render_settings.compute_smooth_normals;
+
                 let task = thread_pool.spawn(async move {
                     let mut colors: Vec<[f32; 4]> = Vec::new();
                     if let Some(VertexAttributeValues::Float32x3(positions)) = 
@@ -576,12 +581,12 @@ pub fn update_chunk_lod(
                             let height_multiplier = get_biome_height_multiplier(temp, humidity);
                             let elevation_offset = get_biome_elevation_offset(temp, humidity);
                             let final_height = base_height * height_multiplier + elevation_offset;
-                            colors.push(get_terrain_color(final_height, temp, humidity));
+                            colors.push(get_terrain_color(final_height, temp, humidity, smoothness));
                             pos[1] = final_height * MAP_HEIGHT_SCALE;
                         }
                     }
                     mesh_clone.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-                    if COMPUTE_SMOOTH_NORMALS {
+                    if compute_smooth_normals {
                         mesh_clone.compute_smooth_normals();
                     } else {
                         mesh_clone.duplicate_vertices();
@@ -636,7 +641,7 @@ pub fn despawn_out_of_bounds_chunks(
     }
 }
 
-fn get_color_from_palette(height: f32, palette: &[TerrainStop]) -> Color {
+fn get_color_from_palette(height: f32, palette: &[TerrainStop], smoothness: f32) -> Color {
     if height.is_nan() { return palette[0].color; }
 
     let mut upper_idx = 0;
@@ -653,12 +658,12 @@ fn get_color_from_palette(height: f32, palette: &[TerrainStop]) -> Color {
     let range = upper.height - lower.height;
     let t = ((height - lower.height) / range).clamp(0.0, 1.0);
     
-    let blend_start = 1.0 - TERRAIN_SMOOTHNESS.clamp(0.0, 1.0);
+    let blend_start = 1.0 - smoothness.clamp(0.0, 1.0);
     let base_color = lower.color.to_linear();
     let next_color = upper.color.to_linear();
 
-    if t > blend_start && TERRAIN_SMOOTHNESS > 0.0 {
-        let blend_t = (t - blend_start) / TERRAIN_SMOOTHNESS;
+    if t > blend_start && smoothness > 0.0 {
+        let blend_t = (t - blend_start) / smoothness;
         base_color.mix(&next_color, blend_t).into()
     } else {
         base_color.into()
@@ -666,12 +671,12 @@ fn get_color_from_palette(height: f32, palette: &[TerrainStop]) -> Color {
 }
 
 // Notice the signature changed to accept temp and humidity
-fn get_terrain_color(height: f32, temp: f32, humidity: f32) -> [f32; 4] {
+fn get_terrain_color(height: f32, temp: f32, humidity: f32, smoothness: f32) -> [f32; 4] {
     // 1. Get what the color *would* be if the world was 100% this biome
-    let forest_color = get_color_from_palette(height, FOREST_TERRAIN_LEVELS).to_linear();
-    let desert_color = get_color_from_palette(height, DESERT_TERRAIN_LEVELS).to_linear();
-    let taiga_color = get_color_from_palette(height, TAIGA_TERRAIN_LEVELS).to_linear();
-    let grass_color = get_color_from_palette(height, GRASSLANDS_TERRAIN_LEVELS).to_linear();
+    let forest_color = get_color_from_palette(height, FOREST_TERRAIN_LEVELS, smoothness).to_linear();
+    let desert_color = get_color_from_palette(height, DESERT_TERRAIN_LEVELS, smoothness).to_linear();
+    let taiga_color = get_color_from_palette(height, TAIGA_TERRAIN_LEVELS, smoothness).to_linear();
+    let grass_color = get_color_from_palette(height, GRASSLANDS_TERRAIN_LEVELS, smoothness).to_linear();
 
     // 2. Bilinear Interpolation
     // First, blend the humidity axis (dry -> wet) for both hot and cold extremes
