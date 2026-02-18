@@ -101,7 +101,7 @@ fn main() {
         .init_resource::<WorldGenerationSettings>()
         // Initialize the daylight cycle
         .insert_resource(DayNightCycle {
-            time_of_day: 0.52, // Start at sunrise
+            time_of_day: 0.50, // Start at sunrise
             speed: 0.01,  
             inclination: -1.0,     
         })

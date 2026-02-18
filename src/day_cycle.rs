@@ -86,7 +86,7 @@ pub fn update_daylight_cycle(
                 let current_star_dir = star_rotation.mul_vec3(-star.offset).normalize(); 
                 
                 let star_elevation = current_star_dir.dot(Vec3::Y);
-                let horizon_fade = ((star_elevation + 0.05) / 0.30).clamp(0.0, 1.0);
+                let horizon_fade = ((star_elevation + 0.05) / 0.35).clamp(0.0, 1.0);
                 let final_alpha = global_star_visibility * horizon_fade;
 
                 if final_alpha > 0.001 {
