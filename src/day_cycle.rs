@@ -1,6 +1,4 @@
-
 use bevy::prelude::*;
-
 use crate::{consts::*, world_generation::ChunkManager, controls::MainCamera};
 
 #[derive(Resource)]
@@ -24,18 +22,15 @@ pub fn update_daylight_cycle(
 ) {
     cycle.time_of_day = (cycle.time_of_day + cycle.speed * time.delta_secs()) % 1.0;
 
-
     // Convert 0.0-1.0 time to radians
-    let angle = cycle.time_of_day * core::f32::consts::TAU;
+    let angle = cycle.time_of_day * std::f32::consts::TAU;
 
-    // 1. Time of day rotation (The sun's progress through the sky)
+    // 1. Time of day rotation
     let orbit_rotation = Quat::from_rotation_x(angle);
 
-    // 2. Inclination rotation (The tilt based on latitude)
-    // Rotating around Z tips the "noon" position away from the vertical (Y) axis
+    // 2. Inclination rotation
     let tilt_rotation = Quat::from_rotation_z(cycle.inclination);
         
-
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
 
         transform.rotation = tilt_rotation * orbit_rotation;
@@ -45,11 +40,9 @@ pub fn update_daylight_cycle(
         // Dot product with straight down. 1.0 = noon, 0.0 = horizon, -1.0 = midnight
         let up_dot = sun_dir.dot(Vec3::NEG_Y); 
 
-        // We add 0.1 so dawn starts just below the horizon, and multiply by 5.0 to make the fade faster.
+        // 0.0 = Night, 1.0 = Day
         let daylight = ((up_dot + 0.1) * 5.0).clamp(0.0, 1.0); 
         
-        // NEW: Horizon factor. Peaks at 1.0 when up_dot is 0.0, fades to 0.0 by +/- 0.25
-        // Tweak the 0.25 to make the sunset phase last longer or shorter.
         let horizon_factor = (1.0 - (up_dot.abs() / 0.40)).clamp(0.0, 1.0);
 
         // Apply lighting
@@ -57,16 +50,20 @@ pub fn update_daylight_cycle(
 
         // Update Environment
         if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
-            ambient.brightness = 10.0 + (daylight * 9.5); 
+            
+            // --- AMBIENT LIGHT CHANGE ---
+            // Interpolate between 50.0 (Night) and 155.0 (Day) based on the daylight factor
+            let min_ambient = 50.0;
+            let max_ambient = 200.0;
+            ambient.brightness = min_ambient + (max_ambient - min_ambient) * daylight; 
 
-            // Simple Fog Color Lerp (using Vec3 for universally safe math)
+
+            // Simple Fog Color Lerp
             let night_fog = Vec3::new(0.1, 0.1, 0.2);
             let day_fog = Vec3::new(0.35, 0.48, 0.66);
-            let sunset_fog = Vec3::new(0.90, 0.45, 0.2); // An orange/pinkish hue
+            let sunset_fog = Vec3::new(0.90, 0.45, 0.2);
             
-            // 1. Interpolate between night and day like normal
             let base_fog = night_fog.lerp(day_fog, daylight);
-            // 2. Blend in the sunset color based on the horizon factor
             let current_fog = base_fog.lerp(sunset_fog, horizon_factor);
             
             let final_color = Color::srgb(current_fog.x, current_fog.y, current_fog.z);
@@ -77,7 +74,7 @@ pub fn update_daylight_cycle(
             fog.directional_light_color = Color::NONE; 
         }
 
-        // Keep sun mesh far away in the background
+        // Keep sun mesh far away
         if let Ok(camera_transform) = camera_query.single() {
             transform.translation = camera_transform.translation - sun_dir * CHUNK_SIZE * chunk_manager.render_distance as f32;
             let scale_factor = 0.1 * chunk_manager.render_distance as f32;

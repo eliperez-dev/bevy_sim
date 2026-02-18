@@ -93,7 +93,7 @@ fn main() {
             lod_distance_multiplier: 15.0,
         })
         .insert_resource(RenderSettings {
-            cascades: 0,
+            cascades: 1,
             just_updated: false,
             terrain_smoothness: 0.0,
             compute_smooth_normals: false,
@@ -101,9 +101,9 @@ fn main() {
         .init_resource::<WorldGenerationSettings>()
         // Initialize the daylight cycle
         .insert_resource(DayNightCycle {
-            time_of_day: 0.50, // Start at sunrise
-            speed: 0.005,  
-            inclination: -0.8,     
+            time_of_day: 0.52, // Start at sunrise
+            speed: 0.01,  
+            inclination: -1.0,     
         })
         .init_resource::<ControlMode>()
         .add_plugins(EguiPlugin::default())
@@ -261,10 +261,10 @@ fn setup_camera_fog(mut commands: Commands) {
             },
         }, 
         AmbientLight {
-            color: Color::WHITE,
-            brightness: 10.0,
-            affects_lightmapped_meshes: false, // Standard daytime ambient brightness
-        },
+        color: Color::srgba(0.35, 0.48, 0.66, 1.0), // Blue-grey for sky color
+        brightness: 2000.0, // Crank this up to match your Sun's high lux
+        affects_lightmapped_meshes: false,
+    },
     ));
 }
 

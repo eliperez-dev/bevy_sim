@@ -6,7 +6,7 @@ pub const OCEAN_THRESHOLD: f32 = 0.45;
 pub const CHUNK_SIZE: f32 = 1000.0; 
 pub const MAP_HEIGHT_SCALE: f32 = 230.0;
 
-pub const MAX_ILLUMANENCE: f32 = 7_300.0;
+pub const MAX_ILLUMANENCE: f32 = 5_300.0;
 
 pub struct TerrainStop {
     pub height: f32,
