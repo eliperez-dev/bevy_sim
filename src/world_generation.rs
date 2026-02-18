@@ -1,4 +1,5 @@
 use bevy::color::Mix;
+use bevy::ecs::relationship::Relationship;
 use noise::{NoiseFn, Perlin};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use futures_lite::future;
@@ -11,6 +12,61 @@ use bevy::{
 
 use crate::consts::*;
 use crate::controls::MainCamera;
+
+#[derive(Component)]
+pub struct WaterChunk;
+pub fn animate_water_cpu(
+    time: Res<Time>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    // 1. Add `&Parent` so the water knows which chunk it belongs to
+    water_query: Query<(&Mesh3d, &GlobalTransform, &ChildOf), With<WaterChunk>>, 
+    // 2. Query to read the terrain chunk's data
+    chunk_query: Query<&Chunk>, 
+) {
+    let t = time.elapsed_secs();
+    
+    let amplitude = 5.0;
+    let frequency = 0.015;
+    let speed = 1.5;
+
+    // Grab the subdivision count of your highest fidelity LOD.
+    // Assuming LOD_LEVELS is sorted nearest-to-farthest, index 0 is your highest LOD.
+    // (e.g., if your highest LOD is 64 subdivisions, this evaluates to 64)
+    let highest_lod = LOD_LEVELS[0].1; 
+
+    for (mesh_handle, global_transform, parent) in water_query.iter() {
+        
+        // 3. Look up the parent terrain chunk. If it doesn't exist, skip.
+        let Ok(chunk) = chunk_query.get(parent.get()) else { continue; };
+        
+        // Is this the highest LOD chunk?
+        let is_high_fidelity = chunk.current_lod == highest_lod;
+
+        if let Some(mesh) = meshes.get_mut(mesh_handle) {
+            if let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+                
+                let chunk_world_pos = global_transform.translation();
+
+                for pos in positions.iter_mut() {
+                    if is_high_fidelity {
+                        // Do the expensive trig math for nearby chunks
+                        let world_x = pos[0] + chunk_world_pos.x;
+                        let world_z = pos[2] + chunk_world_pos.z;
+
+                        let wave1 = (world_x * frequency + t * speed).sin() * amplitude;
+                        let wave2 = (world_z * frequency * 0.8 + t * speed * 1.2).cos() * amplitude;
+                        
+                        pos[1] = wave1 + wave2; 
+                    } else {
+                        // 4. Force lower LOD chunks to remain perfectly flat.
+                        // By bypassing the sine/cosine math entirely, we save CPU cycles.
+                        pos[1] = 0.0;
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Biome {
@@ -371,9 +427,10 @@ pub fn generate_chunks(
                 Chunk { x, z, current_lod: lod },
             )).with_children(|parent| {
                 parent.spawn((
-                    Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE))),
+                    Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE).subdivisions(lod))),
                     MeshMaterial3d(shared_materials.water_material.clone()),
                     Transform::from_xyz(0.0, 0.0, 0.0),
+                    WaterChunk,
                 ));
             });
             spawned_count += 1;
@@ -384,12 +441,13 @@ pub fn generate_chunks(
 pub fn update_chunk_lod(
     mut commands: Commands,
     camera: Query<&Transform, With<MainCamera>>,
-    mut chunks: Query<(Entity, &mut Chunk, &Mesh3d, &Transform), Without<ChunkTask>>,
+    mut chunks: Query<(Entity, &mut Chunk, &Mesh3d, &Transform, Option<&Children>), Without<ChunkTask>>,
     mut meshes: ResMut<Assets<Mesh>>,
     world_generator: Res<WorldGenerator>,
     mut chunk_manager: ResMut<ChunkManager>,
     mut last_cam_pos: Local<Option<(i32, i32)>>,
     settings: Res<WorldGenerationSettings>,
+    water_query: Query<(Entity, &Mesh3d), With<WaterChunk>>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
@@ -400,7 +458,7 @@ pub fn update_chunk_lod(
         *last_cam_pos = Some((cam_x, cam_z));
         
         let mut candidates = Vec::new();
-        for (entity, chunk, _, _) in &chunks {
+        for (entity, chunk, _, _, children) in &chunks {
             let dx = (chunk.x - cam_x) as f32;
             let dz = (chunk.z - cam_z) as f32;
             let distance_sq = dx * dx + dz * dz;
@@ -423,15 +481,37 @@ pub fn update_chunk_lod(
     while processed_count < settings.max_chunks_per_frame && !chunk_manager.lod_to_update.is_empty() {
         let entity = chunk_manager.lod_to_update.remove(0);
 
-        if let Ok((entity, chunk, _mesh_handle, transform)) = chunks.get_mut(entity) {
+        if let Ok((entity, chunk, _mesh_handle, transform, children)) = chunks.get_mut(entity) {
             let dx = (chunk.x - cam_x) as f32;
             let dz = (chunk.z - cam_z) as f32;
             let distance_sq = dx * dx + dz * dz;
             let desired_lod = get_lod_subdivisions(distance_sq);
 
+
             // Double check if it still needs an update (might have been updated by another frame's scan)
             if desired_lod == chunk.current_lod {
                 continue;
+            }
+
+            if let Some(children) = children {
+                for child in children.iter() {
+                    // Check if this child is our WaterChunk
+                    if let Ok((water_entity, old_water_mesh)) = water_query.get(child) {
+                        
+                        // Generate a new flat plane with the updated LOD subdivisions
+                        let new_water_mesh_handle = meshes.add(
+                            Plane3d::default().mesh()
+                            .size(CHUNK_SIZE, CHUNK_SIZE)
+                            .subdivisions(desired_lod)
+                        );
+                        
+                        // Swap the new mesh onto the child entity
+                        commands.entity(water_entity).insert(Mesh3d(new_water_mesh_handle));
+                        
+                        // Clean up the old mesh from memory
+                        meshes.remove(old_water_mesh);
+                    }
+                }
             }
 
             let new_mesh_handle = meshes.add(
@@ -482,7 +562,7 @@ pub fn update_chunk_lod(
                 commands.entity(entity).insert(ChunkTask { task, new_handle: Some(new_mesh_handle) });
                 
                 // Finalize the chunk's LOD state
-                if let Ok((_, mut chunk, _, _)) = chunks.get_mut(entity) {
+                if let Ok((_, mut chunk, _, _, children)) = chunks.get_mut(entity) {
                     chunk.current_lod = desired_lod;
                 }
                 processed_count += 1;

@@ -95,7 +95,8 @@ fn main() {
             handle_compute_tasks, 
             update_chunk_lod, 
             update_daylight_cycle.after(camera_controls),
-            draw_lod_rings
+            draw_lod_rings,
+            animate_water_cpu,
         ))
         .add_systems(PostUpdate, despawn_out_of_bounds_chunks)
         .run();
@@ -138,9 +139,10 @@ fn setup(
             ..default()
         }),
         water_material: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.3, 0.3, 0.6),
+            base_color: Color::srgba(0.15, 0.35, 0.7, 0.9),
             alpha_mode: AlphaMode::Blend,
-            perceptual_roughness: 0.5,
+            perceptual_roughness: 0.1,
+            metallic: 0.1,
             ..default()
         }),
     });
