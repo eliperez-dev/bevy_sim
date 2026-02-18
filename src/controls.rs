@@ -37,14 +37,14 @@ impl Default for Aircraft {
             yaw_velocity: 0.0,
 
             // Default Physics Values
-            max_speed: 250.0,
-            drag_factor: 0.5,
-            g_force_drag: 100.0,
+            max_speed: 265.0,
+            drag_factor: 0.7,
+            g_force_drag: 220.0,
             pitch_strength: 2.0,
             roll_strength: 3.0,
             yaw_strength: 1.0,
             bank_turn_strength: 0.5,
-            auto_level_strength: 1.0,
+            auto_level_strength: 0.4,
         }
     }
 }
