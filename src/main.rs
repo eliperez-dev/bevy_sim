@@ -108,7 +108,7 @@ fn main() {
         .init_resource::<ControlMode>()
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup_camera_system)
-        .add_systems(EguiPrimaryContextPass, ui_example_system)
+        .add_systems(EguiPrimaryContextPass, debugger_ui)
         .add_systems(Startup, (setup, setup_camera_fog, spawn_stars).chain())
         .add_systems(Update, (
             camera_controls, 
@@ -129,7 +129,7 @@ fn main() {
 }
 
 #[derive(Resource)]
-struct RenderSettings {
+pub struct RenderSettings {
     cascades: usize,
     just_updated: bool,
     terrain_smoothness: f32,
@@ -292,8 +292,7 @@ fn update_debugger(
     message.push_str(&format!("Chunks: {:?}\n", chunks.spawned_chunks.len()));
     message.push_str(&format!("Time of Day: {:.2}\n", cycle.time_of_day)); 
 }
-
-fn ui_example_system(
+pub fn debugger_ui(
     mut contexts: EguiContexts,
     mut day_cycle: ResMut<DayNightCycle>,
     mut wireframe_config: ResMut<WireframeConfig>,
@@ -301,30 +300,57 @@ fn ui_example_system(
     mut world_settings: ResMut<WorldGenerationSettings>,
     mut fog_query: Query<&mut DistanceFog, With<MainCamera>>,
     mut render_settings: ResMut<RenderSettings>,
-) -> Result {
+    // ADDED: Access to the aircraft component
+    mut aircraft_query: Query<&mut Aircraft, Without<MainCamera>>,
+) -> Result<(), > { // Note: Changed Result return type signature slightly for safety
+    
     egui::Window::new("Debugger").show(contexts.ctx_mut()?, |ui| {
-
         render_settings.just_updated = false;
 
+        // --- AIRCRAFT SETTINGS ---
+        // We put this at the top since it's what you are currently working on
+        ui.heading("Aircraft Physics");
+        if let Ok(mut aircraft) = aircraft_query.single_mut() {
+            ui.horizontal(|ui| {
+                ui.label(format!("Speed: {:.0}", aircraft.speed));
+                ui.add(egui::ProgressBar::new(aircraft.speed / aircraft.max_speed));
+            });
+            ui.label(format!("Throttle: {:.0}%", aircraft.throttle * 100.0));
+
+            ui.collapsing("Flight Model Tuning", |ui| {
+                ui.label("Forces");
+                ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed"));
+                ui.add(egui::Slider::new(&mut aircraft.drag_factor, 0.1..=2.0).text("Drag (Acceleration)"));
+                ui.add(egui::Slider::new(&mut aircraft.g_force_drag, 0.0..=500.0).text("Turn Drag (Energy Bleed)"));
+
+                ui.separator();
+                ui.label("Responsiveness");
+                ui.add(egui::Slider::new(&mut aircraft.pitch_strength, 0.5..=10.0).text("Pitch Strength"));
+                ui.add(egui::Slider::new(&mut aircraft.roll_strength, 0.5..=10.0).text("Roll Strength"));
+                ui.add(egui::Slider::new(&mut aircraft.yaw_strength, 0.5..=10.0).text("Yaw Strength"));
+
+                ui.separator();
+                ui.label("Assists");
+                ui.add(egui::Slider::new(&mut aircraft.bank_turn_strength, 0.0..=5.0).text("Auto-Turn (Bank)"));
+                ui.add(egui::Slider::new(&mut aircraft.auto_level_strength, 0.0..=5.0).text("Auto-Level (Stability)"));
+            });
+        } else {
+            ui.label("No Aircraft found.");
+        }
+        ui.separator();
+
+        // --- WORLD GEN SETTINGS (Previous code) ---
         ui.heading("Time Settings");
-        
-        // Sun Time Slider
         ui.add(egui::Slider::new(&mut day_cycle.time_of_day, 0.0..=1.0).text("Time of Day"));
-        
-        // Sun Speed
         ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.1).text("Time Speed"));
-        
-        // Sun Inclination
         ui.add(egui::Slider::new(&mut day_cycle.inclination, -1.0..=1.0).text("Inclination"));
 
         ui.separator();
 
         ui.heading("Render Settings");
-        
-        // Global Wireframe Toggle
         ui.checkbox(&mut wireframe_config.global, "Global Wireframe");
 
-        if ui.add(egui::Slider::new(&mut chunk_manager.render_distance,2..=150).text("Render Distance")).changed() {
+        if ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance")).changed() {
             render_settings.just_updated = true;
         }
 
@@ -350,13 +376,19 @@ fn ui_example_system(
             render_settings.just_updated = true;
         }
 
-        if let Ok(mut fog) = fog_query.single_mut()
-            && let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
+        if let Ok(mut fog) = fog_query.single_mut() {
+             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
                 ui.add(egui::Slider::new(density, 0.000005..=0.001).text("Fog Density").logarithmic(true));
             }
+        }
 
         if ui.button("Reset Simulation").clicked() {
             day_cycle.time_of_day = 0.5;
+            // Also reset plane speed if needed
+            if let Ok(mut aircraft) = aircraft_query.single_mut() {
+                aircraft.speed = 100.0;
+                aircraft.throttle = 0.5;
+            }
         }
     });
     Ok(())
