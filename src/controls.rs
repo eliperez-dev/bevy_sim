@@ -115,6 +115,8 @@ pub fn camera_controls(
         }
     }
 }
+
+
 pub fn camera_follow_aircraft(
     time: Res<Time>,
     control_mode: Res<ControlMode>,
@@ -125,40 +127,46 @@ pub fn camera_follow_aircraft(
         return;
     }
 
-    let Ok((transform, aircraft)) = aircraft_query.single() else { return; };
-    let Ok(mut camera) = camera_query.single_mut() else { return; };
+    let Ok((plane_transform, aircraft)) = aircraft_query.single() else { return; };
+    let Ok(mut camera_transform) = camera_query.single_mut() else { return; };
 
-    // --- CONFIGURATION ---
-    let base_distance = 80.0;    // Minimum distance at low speed
-    let max_extra_dist = 60.0;   // The most the camera can pull back
-    let speed_threshold = 200.0; // The "anchor" speed for the curve
+    // --- 1. VELOCITY COMPENSATION (The Fix) ---
+    // Calculate how much the plane moved this frame.
+    // We use the same math as the movement system: direction * speed * delta_time
+    let plane_movement = plane_transform.forward().as_vec3() * aircraft.speed * time.delta_secs();
     
-    let height = 80.0;
+    // meaningful change: Move the camera by the plane's speed *before* smoothing.
+    // This removes the "lag" caused by high speeds.
+    camera_transform.translation += plane_movement;
+
+
+    // --- 2. CONFIGURATION ---
+    let base_distance = 180.0;
+    let max_extra_dist = 40.0;
+    let speed_threshold = 1000.0;
+    
+    let height = 90.0;
     let look_ahead_distance = 150.0;
     let smoothness = 5.0; 
 
-    // --- CURVED DISTANCE CALCULATION ---
-    // We calculate a ratio of current speed vs threshold.
-    // Using a power of 0.5 (square root) creates a curve that flattens out.
+    // --- 3. CURVED DISTANCE CALCULATION ---
     let speed_ratio = (aircraft.speed / speed_threshold).clamp(0.0, 2.0);
     let dynamic_distance = base_distance + (max_extra_dist * speed_ratio.powf(0.5));
 
-    // Calculate dynamic smoothness: make the camera "snappier" at high speeds
-    // to prevent it from feeling like it's dragging on a rubber band.
     let dynamic_smoothness = smoothness + (speed_ratio * 2.0);
     let t = (time.delta_secs() * dynamic_smoothness).min(1.0);
 
-    // 1. CALCULATE TARGET POSITION
-    let target_position = transform.translation 
-        + (transform.back() * dynamic_distance) 
-        + (transform.up() * height);
+    // --- 4. CALCULATE TARGET POSITION ---
+    let target_position = plane_transform.translation 
+        + (plane_transform.back() * dynamic_distance) 
+        + (plane_transform.up() * height);
     
-    camera.translation = camera.translation.lerp(target_position, t);
+    // Now we lerp. Since we already added 'plane_movement' above, 
+    // this lerp only handles the offset/drift, not the 2000 mph speed.
+    camera_transform.translation = camera_transform.translation.lerp(target_position, t);
 
-    // 2. CALCULATE "LOOK AHEAD" TARGET
-    let look_target = transform.translation + (transform.forward() * look_ahead_distance);
-
-    // 3. SMOOTH ROTATION
-    let target_rotation = camera.looking_at(look_target, transform.up()).rotation;
-    camera.rotation = camera.rotation.slerp(target_rotation, t);
+    // --- 5. SMOOTH ROTATION ---
+    let look_target = plane_transform.translation + (plane_transform.forward() * look_ahead_distance);
+    let target_rotation = camera_transform.looking_at(look_target, plane_transform.up()).rotation;
+    camera_transform.rotation = camera_transform.rotation.slerp(target_rotation, t);
 }
