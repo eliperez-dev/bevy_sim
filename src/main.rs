@@ -125,12 +125,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     // Shadows
-    let cascade_shadow_config = CascadeShadowConfigBuilder {
-        first_cascade_far_bound: LIGHTING_BOUNDS/100.0,
-        maximum_distance: LIGHTING_BOUNDS,
-        ..default()
-    }
-    .build();
+    let cascade_shadow_config = CascadeShadowConfigBuilder::default().build();
 
     // World Generator
     commands.insert_resource(WorldGenerator::new(0));

@@ -7,7 +7,6 @@ pub const CHUNK_SIZE: f32 = 1000.0;
 pub const MAP_HEIGHT_SCALE: f32 = 230.0;
 pub const TERRAIN_SMOOTHNESS: f32 = 0.0;
 
-pub const LIGHTING_BOUNDS: f32 = 5000.0;
 pub const COMPUTE_SMOOTH_NORMALS: bool = false;
 
 pub const RENDER_DISTANCE: i32 = 20;

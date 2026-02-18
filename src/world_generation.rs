@@ -1,5 +1,6 @@
 use bevy::color::Mix;
 use bevy::ecs::relationship::Relationship;
+use bevy::light::CascadeShadowConfig;
 use noise::{NoiseFn, Perlin};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use futures_lite::future;
@@ -363,6 +364,7 @@ pub fn generate_chunks(
     camera: Query<&Transform, With<MainCamera>>,
     mut last_render_distance: Local<Option<i32>>,
     settings: Res<WorldGenerationSettings>,
+    mut sun_query: Query<&mut CascadeShadowConfig, (With<crate::day_cycle::Sun>, Without<MainCamera>)>,
 ) {
     let cam_transform = camera.single().unwrap().translation;
     
@@ -396,6 +398,16 @@ pub fn generate_chunks(
             let db = ((b.0 - cam_x).pow(2) + (b.1 - cam_z).pow(2)) as f32;
             da.partial_cmp(&db).unwrap()
         });
+
+        // Update cascades
+        let mut cascade = sun_query.single_mut().unwrap();
+
+        *cascade = bevy::light::CascadeShadowConfigBuilder {
+        first_cascade_far_bound: chunk_manager.render_distance as f32 * CHUNK_SIZE / 10.0,
+        maximum_distance: chunk_manager.render_distance as f32 * CHUNK_SIZE,
+        ..default()
+        }
+        .build();
     }
 
     // Spawn a limited number of chunks from the queue
@@ -431,6 +443,7 @@ pub fn generate_chunks(
                     MeshMaterial3d(shared_materials.water_material.clone()),
                     Transform::from_xyz(0.0, 0.0, 0.0),
                     WaterChunk,
+                    bevy::light::NotShadowCaster
                 ));
             });
             spawned_count += 1;
