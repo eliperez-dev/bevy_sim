@@ -76,11 +76,15 @@ fn main() {
             lod_to_update: Vec::new(),
             render_distance: RENDER_DISTANCE,
         })
+        .insert_resource(RenderSettings {
+            cascades: 0,
+            just_updated: false,
+        })
         .init_resource::<WorldGenerationSettings>()
         // Initialize the daylight cycle
         .insert_resource(DayNightCycle {
             time_of_day: 0.50, // Start at sunrise
-            speed: 0.025,  
+            speed: 0.005,  
             inclination: -0.8,     
         })
         .init_resource::<ControlMode>()
@@ -104,6 +108,12 @@ fn main() {
             camera_follow_aircraft,
         ))
         .run();
+}
+
+#[derive(Resource)]
+struct RenderSettings {
+    cascades: usize,
+    just_updated: bool,
 }
 
 fn setup_camera_system(mut commands: Commands) {
@@ -179,7 +189,7 @@ fn setup(
         Aircraft {
             speed: 230.0,
         },
-        Transform::from_xyz(0.0, 300.0, 0.0).with_scale(Vec3::splat(1.0)),
+        Transform::from_xyz(0.0, 300.0, 0.0).with_scale(Vec3::splat(0.1)),
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();
@@ -272,6 +282,7 @@ fn ui_example_system(
     mut chunk_manager: ResMut<ChunkManager>,
     mut world_settings: ResMut<WorldGenerationSettings>,
     mut fog_query: Query<&mut DistanceFog, With<MainCamera>>,
+    mut render_settings: ResMut<RenderSettings>,
 ) -> Result {
     egui::Window::new("Debugger").show(contexts.ctx_mut()?, |ui| {
         ui.heading("Time Settings");
@@ -294,6 +305,9 @@ fn ui_example_system(
 
         ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance"));
         ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=500).text("Max Chunks / Frame"));
+        if ui.add(egui::Slider::new(&mut render_settings.cascades, 0..=4).text("Cascades")).changed() {
+            render_settings.just_updated = true;
+        }
 
         if let Ok(mut fog) = fog_query.single_mut() {
             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {

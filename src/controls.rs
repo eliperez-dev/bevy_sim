@@ -49,18 +49,21 @@ pub fn camera_controls(
         wire_frame.global = !wire_frame.global;
     }
 
-
     let rotation_speed = 0.5;
+    let freeflight_pan_speed = match keyboard.pressed(KeyCode::ShiftLeft) {
+        true => 2000.0,
+        false => 300.0,
+    };
     let panning_delta = rotation_speed * time.delta_secs();
     
     let Ok((mut plane_transform, mut aircraft)) = aircraft_query.single_mut() else { return };
             
     if keyboard.pressed(KeyCode::Equal) {
-        aircraft.speed = (aircraft.speed + 1000.0 * time.delta_secs()).min(2000.0);
+        aircraft.speed = (aircraft.speed + 1000.0 * time.delta_secs()).min(250.0);
     } 
 
     if keyboard.pressed(KeyCode::Minus) {
-        aircraft.speed =  (aircraft.speed - 1000.0 * time.delta_secs()).max(40.0);
+        aircraft.speed =  (aircraft.speed - 1000.0 * time.delta_secs()).max(80.0);
     }
 
     let forward = plane_transform.forward().as_vec3();
@@ -89,7 +92,7 @@ pub fn camera_controls(
             if keyboard.pressed(KeyCode::ArrowUp) { camera_transform.rotate_local_x(panning_delta); }
             if keyboard.pressed(KeyCode::ArrowDown) { camera_transform.rotate_local_x(-panning_delta); }
 
-            camera_transform.translation += pan_direction.normalize_or_zero() * aircraft.speed * time.delta_secs();
+            camera_transform.translation += pan_direction.normalize_or_zero() * freeflight_pan_speed* time.delta_secs();
         }
         FlightMode::Aircraft => {
             // --- AIRCRAFT MODE (Flight Sim Style) ---
@@ -141,12 +144,12 @@ pub fn camera_follow_aircraft(
 
 
     // --- 2. CONFIGURATION ---
-    let base_distance = 180.0;
-    let max_extra_dist = 40.0;
-    let speed_threshold = 1000.0;
+    let base_distance = 18.0;
+    let max_extra_dist = 4.0;
+    let speed_threshold = 100.0;
     
-    let height = 90.0;
-    let look_ahead_distance = 150.0;
+    let height = 9.0;
+    let look_ahead_distance = 15.0;
     let smoothness = 5.0; 
 
     // --- 3. CURVED DISTANCE CALCULATION ---

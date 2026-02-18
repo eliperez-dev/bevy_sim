@@ -16,7 +16,7 @@ use crate::controls::MainCamera;
 
 #[derive(Component)]
 pub struct WaterChunk;
-pub fn animate_water_cpu(
+pub fn _animate_water_cpu(
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
     // 1. Add `&Parent` so the water knows which chunk it belongs to
@@ -365,14 +365,21 @@ pub fn generate_chunks(
     mut last_render_distance: Local<Option<i32>>,
     settings: Res<WorldGenerationSettings>,
     mut sun_query: Query<&mut CascadeShadowConfig, (With<crate::day_cycle::Sun>, Without<MainCamera>)>,
+    mut render_settings: ResMut<crate::RenderSettings>,
 ) {
+    let mut cascade = sun_query.single_mut().unwrap();
+
     let cam_transform = camera.single().unwrap().translation;
     
     let cam_x = (cam_transform.x / CHUNK_SIZE).round() as i32;
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
 
     // Only re-scan if the camera has moved to a new chunk or render distance changed
-    if chunk_manager.last_camera_chunk != Some((cam_x, cam_z)) || *last_render_distance != Some(chunk_manager.render_distance) {
+    if chunk_manager.last_camera_chunk != Some((cam_x, cam_z)) ||
+    *last_render_distance != Some(chunk_manager.render_distance) ||
+    render_settings.just_updated
+    {
+        render_settings.just_updated = false;
         chunk_manager.last_camera_chunk = Some((cam_x, cam_z));
         *last_render_distance = Some(chunk_manager.render_distance);
         
@@ -400,11 +407,15 @@ pub fn generate_chunks(
         });
 
         // Update cascades
-        let mut cascade = sun_query.single_mut().unwrap();
-
         *cascade = bevy::light::CascadeShadowConfigBuilder {
         first_cascade_far_bound: chunk_manager.render_distance as f32 * CHUNK_SIZE / 10.0,
-        maximum_distance: chunk_manager.render_distance as f32 * CHUNK_SIZE,
+        maximum_distance: if render_settings.cascades > 0 {
+            chunk_manager.render_distance as f32 * CHUNK_SIZE
+        } else {
+            0.01
+        },
+        minimum_distance: 0.0,
+        num_cascades: render_settings.cascades.max(1),
         ..default()
         }
         .build();
@@ -439,7 +450,7 @@ pub fn generate_chunks(
                 Chunk { x, z, current_lod: lod },
             )).with_children(|parent| {
                 parent.spawn((
-                    Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE).subdivisions(lod))),
+                    Mesh3d(meshes.add(Plane3d::default().mesh().size(CHUNK_SIZE, CHUNK_SIZE).subdivisions(1))),
                     MeshMaterial3d(shared_materials.water_material.clone()),
                     Transform::from_xyz(0.0, 0.0, 0.0),
                     WaterChunk,
@@ -506,26 +517,6 @@ pub fn update_chunk_lod(
                 continue;
             }
 
-            if let Some(children) = children {
-                for child in children.iter() {
-                    // Check if this child is our WaterChunk
-                    if let Ok((water_entity, old_water_mesh)) = water_query.get(child) {
-                        
-                        // Generate a new flat plane with the updated LOD subdivisions
-                        let new_water_mesh_handle = meshes.add(
-                            Plane3d::default().mesh()
-                            .size(CHUNK_SIZE, CHUNK_SIZE)
-                            .subdivisions(desired_lod)
-                        );
-                        
-                        // Swap the new mesh onto the child entity
-                        commands.entity(water_entity).insert(Mesh3d(new_water_mesh_handle));
-                        
-                        // Clean up the old mesh from memory
-                        meshes.remove(old_water_mesh);
-                    }
-                }
-            }
 
             let new_mesh_handle = meshes.add(
                 Plane3d::default().mesh()

@@ -1,5 +1,5 @@
 
-use bevy::{light::{CascadeShadowConfig, CascadeShadowConfigBuilder}, prelude::*};
+use bevy::{light::{CascadeShadowConfig}, prelude::*};
 
 use crate::{consts::*, world_generation::ChunkManager, controls::MainCamera};
 
@@ -17,7 +17,7 @@ pub fn update_daylight_cycle(
     time: Res<Time>,
     mut cycle: ResMut<DayNightCycle>,
     mut clear_color: ResMut<ClearColor>,
-    mut sun_query: Query<(&mut Transform, &mut DirectionalLight, &mut CascadeShadowConfig), (With<Sun>, Without<MainCamera>)>,
+    mut sun_query: Query<(&mut Transform, &mut DirectionalLight), (With<Sun>, Without<MainCamera>)>,
     mut env_query: Query<(&mut DistanceFog, &mut AmbientLight)>, 
     camera_query: Query<&Transform, (With<MainCamera>, Without<Sun>)>,
     chunk_manager: Res<ChunkManager>,
@@ -36,7 +36,7 @@ pub fn update_daylight_cycle(
     let tilt_rotation = Quat::from_rotation_z(cycle.inclination);
         
 
-    if let Ok((mut transform, mut light, mut cascade)) = sun_query.single_mut() {
+    if let Ok((mut transform, mut light)) = sun_query.single_mut() {
 
         transform.rotation = tilt_rotation * orbit_rotation;
 

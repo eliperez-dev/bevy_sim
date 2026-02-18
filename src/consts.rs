@@ -14,8 +14,8 @@ pub const MAX_CHUNKS_PER_FRAME: usize = 200;
 
 pub const MAX_ILLUMANENCE: f32 = 7_300.0;
 
-pub const LOD_QUALITY_MULTIPLIER: u32 = 1;
-pub const LOD_DISTANCE_MULTILIER: f32 = 2.0;
+pub const LOD_QUALITY_MULTIPLIER: u32 = 2;
+pub const LOD_DISTANCE_MULTILIER: f32 = 1.0;
 
 pub const LOD_LEVELS: [(f32, u32); 4] = [
     (5.0 * LOD_DISTANCE_MULTILIER , 8 * LOD_QUALITY_MULTIPLIER),
