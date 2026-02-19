@@ -1,0 +1,57 @@
+name: Build Release
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # This adds a button to let you trigger it manually
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            executable_name: bevy_sim
+            artifact_name: Linux-Build
+          - os: windows-latest
+            executable_name: bevy_sim.exe
+            artifact_name: Windows-Build
+          - os: macos-latest
+            executable_name: bevy_sim
+            artifact_name: macOS-Build
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust Dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Bevy Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ pkg-config libx11-dev libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      - name: Compile Release Build
+        run: cargo build --release
+
+      - name: Package Game and Assets
+        shell: bash
+        run: |
+          mkdir MyGameRelease
+          # Copy the executable
+          cp target/release/${{ matrix.executable_name }} MyGameRelease/
+          # Copy the assets folder (if it exists)
+          if [ -d "assets" ]; then cp -r assets MyGameRelease/; fi
+
+      - name: Upload Game Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: MyGameRelease/
