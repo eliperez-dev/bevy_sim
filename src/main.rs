@@ -95,7 +95,7 @@ fn main() {
             lod_distance_multiplier: 10.0,
         })
         .insert_resource(RenderSettings {
-            cascades: 1,
+            cascades: 0,
             just_updated: false,
             terrain_smoothness: 0.0,
             compute_smooth_normals: false,
@@ -108,7 +108,6 @@ fn main() {
             inclination: -1.0,     
         })
         .init_resource::<ControlMode>()
-        .init_resource::<VerticalSpeedTracker>()
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup_camera_system)
         .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
@@ -210,7 +209,7 @@ fn setup(
     // 1. Create a "parent" entity for the physics/logic
     let plane_entity = commands.spawn((
         Aircraft::default(),
-        Transform::from_xyz(0.0, 1200.0, 0.0).with_scale(Vec3::splat(0.1)),
+        Transform::from_xyz(0.0, SPAWN_HEIGHT, 0.0).with_scale(Vec3::splat(0.1)),
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();
@@ -229,7 +228,7 @@ fn setup(
     commands.spawn((Text::new("Pos: N/A" ),
         Node {
             position_type: PositionType::Absolute,
-            bottom: px(12.0),
+            top: px(12.0),
             left: px(12.0),
             ..default()
         },
@@ -278,11 +277,7 @@ fn update_debugger(
     chunks: Res<ChunkManager>,
     cycle: Res<DayNightCycle>,
     control_mode: Res<ControlMode>,
-    // Note: Assuming 'Debugger' wraps a Text component directly or via a tuple struct
-    // Based on your snippet: &mut debugger.single_mut().unwrap().0
     mut debugger: Query<&mut Text, With<Debugger>>,
-    // Optional: Add Aircraft query if you want to show Speed/Throttle in the overlay text too
-    aircraft_query: Query<&Aircraft>, 
 ) {
     let Ok(camera_transform) = camera.single() else { return };
     let cam_trans = camera_transform.translation;
@@ -312,15 +307,6 @@ fn update_debugger(
     message.push_str(&format!("Biome: {:?} | Climate: {:?}\n", biome, climate));
     message.push_str(&format!("Chunks: {} | Time: {:.2}\n", chunks.spawned_chunks.len(), cycle.time_of_day));
 
-    // --- FLIGHT STATS (If available) ---
-    if control_mode.mode == FlightMode::Aircraft {
-        if let Ok(aircraft) = aircraft_query.single() {
-            message.push_str(&format!("\n--- AIRCRAFT ---\n"));
-            message.push_str(&format!("Speed: {:.0} (Max: {:.0})\n", aircraft.speed, aircraft.max_speed));
-            message.push_str(&format!("Throttle: {:.0}%\n", aircraft.throttle * 100.0));
-            message.push_str(&format!("Alt: {:.0}\n", cam_trans.y));
-        }
-    }
 
     // --- CONTROLS ---
     message.push_str("\n--- CONTROLS ---\n");

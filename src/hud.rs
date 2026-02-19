@@ -2,30 +2,12 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui::{self, Frame}};
 use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera};
 
-#[derive(Resource)]
-pub struct VerticalSpeedTracker {
-    pub last_altitude: f32,
-    pub last_time: f32,
-    pub vertical_speed: f32,
-}
-
-impl Default for VerticalSpeedTracker {
-    fn default() -> Self {
-        Self {
-            last_altitude: 0.0,
-            last_time: 0.0,
-            vertical_speed: 0.0,
-        }
-    }
-}
-
 pub fn flight_hud_system(
     mut contexts: EguiContexts,
     control_mode: Res<ControlMode>,
     aircraft_query: Query<(&Transform, &Aircraft), (With<Aircraft>, Without<MainCamera>)>,
     camera_query: Query<&Transform, With<MainCamera>>,
     time: Res<Time>,
-    mut vs_tracker: ResMut<VerticalSpeedTracker>,
 ) {
     if control_mode.mode != FlightMode::Aircraft {
         return;
@@ -44,92 +26,98 @@ pub fn flight_hud_system(
     let roll = calculate_roll(plane_transform);
     
     let current_time = time.elapsed_secs();
-    let delta_time = current_time - vs_tracker.last_time;
-    
-    if delta_time > 0.1 {
-        let delta_altitude = altitude - vs_tracker.last_altitude;
-        let fpm = (delta_altitude / delta_time) * 60.0;
-        vs_tracker.vertical_speed = vs_tracker.vertical_speed * 0.8 + fpm * 0.2;
-        vs_tracker.last_altitude = altitude;
-        vs_tracker.last_time = current_time;
-    }
-    
-    let vertical_speed = vs_tracker.vertical_speed;
 
-    egui::Window::new("Flight HUD")
+    let ctx = contexts.ctx_mut().unwrap();
+    let window_frame = Frame::default().fill(bevy_egui::egui::Color32::from_rgba_unmultiplied(50, 50, 50, 100));
+    
+    egui::Window::new("Attitude")
         .title_bar(false)
         .resizable(false)
         .anchor(egui::Align2::RIGHT_BOTTOM, [-20.0, -20.0])
-        .fixed_size([550.0, 300.0])
-        .frame(Frame::default().fill(bevy_egui::egui::Color32::from_rgba_unmultiplied(50,50, 50,100)))
-        .show(contexts.ctx_mut().unwrap(), |ui| {
+        .fixed_size([180.0, 220.0])
+        .frame(window_frame)
+        .show(ctx, |ui| {
             ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
-            ui.spacing_mut().item_spacing = egui::Vec2::new(8.0, 4.0);
-
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_min_width(90.0);
-                    ui.label(egui::RichText::new("ALTITUDE").size(12.0));
-                    draw_altitude_tape(ui, altitude);
-                });
-
-                ui.add_space(10.0);
-
-                ui.vertical(|ui| {
-                    ui.set_min_width(160.0);
-                    ui.label(egui::RichText::new("ATTITUDE").size(12.0));
-                    draw_artificial_horizon(ui, pitch, roll);
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Pitch: {:.1}°", pitch));
-                        ui.label(format!("Roll: {:.1}°", roll));
-                    });
-                });
-
-                ui.add_space(10.0);
-
-                ui.vertical(|ui| {
-                    ui.set_min_width(90.0);
-                    ui.label(egui::RichText::new("AIRSPEED").size(12.0));
-                    draw_airspeed_tape(ui, speed);
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("ATTITUDE").size(12.0));
+                draw_artificial_horizon(ui, pitch, roll);
+                ui.horizontal(|ui| {
+                    ui.label(format!("Pitch: {:.1}°", pitch));
+                    ui.label(format!("Roll: {:.1}°", roll));
                 });
             });
-
-            ui.add_space(8.0);
-
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_min_width(100.0);
-                    ui.label("HEADING");
-                    ui.label(egui::RichText::new(format!("{:.0}°", heading))
-                        .size(18.0));
-                    draw_compass_rose(ui, heading);
+        });
+    
+    egui::Window::new("Altitude")
+        .title_bar(false)
+        .resizable(false)
+        .anchor(egui::Align2::RIGHT_BOTTOM, [-210.0, -20.0])
+        .fixed_size([110.0, 200.0])
+        .frame(window_frame)
+        .show(ctx, |ui| {
+            ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("ALTITUDE").size(12.0));
+                draw_altitude_tape(ui, altitude);
+                ui.horizontal(|ui| {
+                    ui.label(format!("{} meters", altitude.round()));
                 });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                ui.vertical(|ui| {
-                    ui.set_min_width(60.0);
-                    ui.label("THROTTLE");
-                    draw_throttle_bar(ui, aircraft.throttle);
+            });
+        });
+    
+    egui::Window::new("Throttle")
+        .title_bar(false)
+        .resizable(false)
+        .anchor(egui::Align2::LEFT_BOTTOM, [150.0, -20.0])
+        .fixed_size([120.0, 70.0])
+        .frame(window_frame)
+        .show(ctx, |ui| {
+            ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("THROTTLE").size(12.0));
+                draw_throttle_gauge(ui, aircraft.throttle);
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}", aircraft.throttle));
                 });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                ui.vertical(|ui| {
-                    ui.set_min_width(90.0);
-                    ui.label(egui::RichText::new("V/S").size(12.0));
-                    draw_vertical_speed_tape(ui, vertical_speed);
+            });
+        });
+    
+    egui::Window::new("Heading")
+        .title_bar(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 20.0])
+        .fixed_size([120.0, 100.0])
+        .frame(window_frame)
+        .show(ctx, |ui| {
+            ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
+            ui.vertical_centered(|ui| {
+                ui.label("HEADING");
+                ui.label(egui::RichText::new(format!("{:.0}°", heading))
+                    .size(18.0));
+                draw_compass_rose(ui, heading);
+            });
+        });
+    
+    egui::Window::new("Airspeed")
+        .title_bar(false)
+        .resizable(false)
+        .fixed_size([110.0, 200.0])
+        .anchor(egui::Align2::LEFT_BOTTOM, [20.0, -20.0])
+        .frame(window_frame)
+        .show(ctx, |ui| {
+            ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("AIRSPEED").size(12.0));
+                draw_airspeed_tape(ui, speed, aircraft);
+                ui.horizontal(|ui| {
+                    ui.label(format!(" {} m/s", aircraft.speed.round()));
                 });
             });
         });
 }
 
 fn calculate_heading(forward: Vec3) -> f32 {
-    let angle = f32::atan2(forward.x, forward.z).to_degrees();
+    let angle = f32::atan2(forward.x, forward.z).to_degrees() - 90.0;
     if angle < 0.0 {
         360.0 + angle
     } else {
@@ -148,30 +136,62 @@ fn calculate_roll(transform: &Transform) -> f32 {
 }
 
 fn draw_compass_rose(ui: &mut egui::Ui, heading: f32) {
-    ui.horizontal(|ui| {
-        ui.add_space(10.0);
+    let (response, painter) = ui.allocate_painter(
+        egui::Vec2::new(100.0, 20.0),
+        egui::Sense::hover(),
+    );
+    
+    let rect = response.rect;
+    let center_x = rect.center().x;
+    let center_y = rect.center().y;
+    
+    let directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    let angles = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0];
+    
+    let pixels_per_degree = 1.0;
+    
+    for i in 0..directions.len() {
+        let angle = angles[i];
+        let mut diff = heading - angle;
         
-        let directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "N"];
-        let angles = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 360.0];
-        
-        for i in 0..directions.len() {
-            let angle_diff = (heading - angles[i]).abs();
-            let angle_diff = if angle_diff > 180.0 { 360.0 - angle_diff } else { angle_diff };
-            
-            if angle_diff < 45.0 {
-                let intensity = 1.0 - (angle_diff / 45.0);
-                let color = egui::Color32::from_rgba_premultiplied(
-                    (255.0 * intensity) as u8,
-                    (255.0 * intensity) as u8,
-                    (255.0 * intensity) as u8,
-                    (255.0 * intensity) as u8,
-                );
-                ui.label(egui::RichText::new(directions[i])
-                    .color(color)
-                    .size(14.0));
-            }
+        if diff > 180.0 {
+            diff -= 360.0;
+        } else if diff < -180.0 {
+            diff += 360.0;
         }
-    });
+        
+        let x_offset = -diff * pixels_per_degree;
+        let x_pos = center_x + x_offset;
+        
+        if x_pos >= rect.left() - 20.0 && x_pos <= rect.right() + 20.0 {
+            let distance = (x_pos - center_x).abs();
+            let max_distance = 50.0;
+            let intensity = (1.0 - (distance / max_distance)).max(0.0).min(1.0);
+            
+            let color = egui::Color32::from_rgba_premultiplied(
+                (255.0 * intensity) as u8,
+                (255.0 * intensity) as u8,
+                (255.0 * intensity) as u8,
+                (255.0 * intensity) as u8,
+            );
+            
+            painter.text(
+                egui::Pos2::new(x_pos, center_y),
+                egui::Align2::CENTER_CENTER,
+                directions[i],
+                egui::FontId::proportional(14.0),
+                color,
+            );
+        }
+    }
+    
+    painter.line_segment(
+        [
+            egui::Pos2::new(center_x, rect.top()),
+            egui::Pos2::new(center_x, rect.top() + 5.0),
+        ],
+        egui::Stroke::new(2.0, egui::Color32::YELLOW),
+    );
 }
 
 fn draw_artificial_horizon(ui: &mut egui::Ui, pitch: f32, roll: f32) {
@@ -277,11 +297,6 @@ fn draw_altitude_tape(ui: &mut egui::Ui, altitude: f32) {
         let rect = response.rect;
         let center_y = rect.center().y;
         
-        painter.rect_filled(
-            rect,
-            egui::CornerRadius::same(5),
-            egui::Color32::from_rgba_premultiplied(20, 20, 20, 200),
-        );
         
         let altitude_step = 25.0;
         let pixels_per_foot = 1.0;
@@ -323,7 +338,7 @@ fn draw_altitude_tape(ui: &mut egui::Ui, altitude: f32) {
                 egui::Vec2::new(80.0, 30.0),
             ),
             egui::CornerRadius::same(3),
-            egui::Color32::from_rgb(0, 100, 0),
+            egui::Color32::from_rgb(100, 100, 100),
         );
         
         painter.text(
@@ -336,7 +351,7 @@ fn draw_altitude_tape(ui: &mut egui::Ui, altitude: f32) {
     });
 }
 
-fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32) {
+fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32, aircraft: &Aircraft) {
     ui.vertical(|ui| {
         let (response, painter) = ui.allocate_painter(
             egui::Vec2::new(90.0, 160.0),
@@ -345,15 +360,33 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32) {
         
         let rect = response.rect;
         let center_y = rect.center().y;
+
+        let aircraft_max_speed = aircraft.max_speed;
         
-        painter.rect_filled(
-            rect,
-            egui::CornerRadius::same(5),
-            egui::Color32::from_rgba_premultiplied(20, 20, 20, 200),
-        );
+        let color = 
+        // Slow speed is red
+        if speed < aircraft.max_speed * 0.3 {
+            egui::Color32::from_rgb(150, 0, 0)
+        }
+        // Nearing slow speed is yellow
+        else if speed < aircraft_max_speed * 0.50 { 
+            egui::Color32::from_rgb(150, 150, 0)
+        }
+        // Good speed is white
+        else if speed < aircraft_max_speed * 0.90 {
+            egui::Color32::from_rgb(0, 150, 0)
+        }
+        // Too fast is Yellow
+        else if speed < aircraft_max_speed * 1.2 { 
+            egui::Color32::from_rgb(150, 150, 0)
+        }
+        // Too fast is red 
+        else {
+            egui::Color32::from_rgb(150, 0, 0)  
+        };
         
-        let speed_step = 20.0;
-        let pixels_per_knot = 2.0;
+        let speed_step = 10.0;
+        let pixels_per_knot = 1.5;
         
         let start_speed = ((speed - 100.0) / speed_step).floor() * speed_step;
         let end_speed = start_speed + 200.0;
@@ -394,7 +427,7 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32) {
                 egui::Vec2::new(80.0, 30.0),
             ),
             egui::CornerRadius::same(3),
-            egui::Color32::from_rgb(0, 50, 100),
+            color,
         );
         
         painter.text(
@@ -407,134 +440,116 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32) {
     });
 }
 
-fn draw_throttle_bar(ui: &mut egui::Ui, throttle: f32) {
+fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
     ui.vertical_centered(|ui| {
         let (response, painter) = ui.allocate_painter(
-            egui::Vec2::new(50.0, 100.0),
+            egui::Vec2::new(140.0, 90.0),
             egui::Sense::hover(),
         );
         
         let rect = response.rect;
+        let center = egui::Pos2::new(rect.center().x, rect.bottom() - 5.0);
+        let radius = 60.0;
         
-        painter.rect_filled(
-            rect,
-            egui::CornerRadius::same(3),
-            egui::Color32::from_rgba_premultiplied(30, 30, 30, 200),
-        );
+        let start_angle = std::f32::consts::PI;
+        let end_angle = 0.0;
+        let angle_range = start_angle - end_angle;
         
-        let fill_height = rect.height() * throttle;
-        let fill_rect = egui::Rect::from_min_max(
-            egui::Pos2::new(rect.left(), rect.bottom() - fill_height),
-            rect.max,
-        );
-        
-        painter.rect_filled(
-            fill_rect,
-            egui::CornerRadius::same(3),
-            egui::Color32::from_rgb(255, 150, 0),
-        );
-        
-        for i in 0..=10 {
-            let y = rect.bottom() - (rect.height() * i as f32 / 10.0);
-            let tick_len = if i % 2 == 0 { 8.0 } else { 4.0 };
+        let num_segments = 100;
+        for i in 0..num_segments {
+            let t1 = i as f32 / num_segments as f32;
+            let t2 = (i + 1) as f32 / num_segments as f32;
             
-            painter.line_segment(
-                [
-                    egui::Pos2::new(rect.left(), y),
-                    egui::Pos2::new(rect.left() + tick_len, y),
-                ],
-                egui::Stroke::new(1.0, egui::Color32::WHITE),
+            let angle1 = start_angle - angle_range * t1;
+            let angle2 = start_angle - angle_range * t2;
+            
+            let color = egui::Color32::from_rgb(40, 40, 40);
+            
+            let inner_radius = radius - 8.0;
+            let p1_outer = egui::Pos2::new(
+                center.x + radius * angle1.cos(),
+                center.y - radius * angle1.sin(),
             );
+            let p2_outer = egui::Pos2::new(
+                center.x + radius * angle2.cos(),
+                center.y - radius * angle2.sin(),
+            );
+            let p1_inner = egui::Pos2::new(
+                center.x + inner_radius * angle1.cos(),
+                center.y - inner_radius * angle1.sin(),
+            );
+            let p2_inner = egui::Pos2::new(
+                center.x + inner_radius * angle2.cos(),
+                center.y - inner_radius * angle2.sin(),
+            );
+            
+            painter.add(egui::Shape::convex_polygon(
+                vec![p1_outer, p2_outer, p2_inner, p1_inner],
+                color,
+                egui::Stroke::NONE,
+            ));
         }
         
-        painter.text(
-            egui::Pos2::new(rect.center().x, rect.center().y),
-            egui::Align2::CENTER_CENTER,
-            format!("{:.0}%", throttle * 100.0),
-            egui::FontId::proportional(14.0),
-            egui::Color32::WHITE,
-        );
-        
-        painter.rect_stroke(
-            rect,
-            egui::CornerRadius::same(3),
-            egui::Stroke::new(1.0, egui::Color32::WHITE),
-            egui::StrokeKind::Middle,
-        );
-    });
-}
-
-fn draw_vertical_speed_tape(ui: &mut egui::Ui, vertical_speed: f32) {
-    ui.vertical(|ui| {
-        let (response, painter) = ui.allocate_painter(
-            egui::Vec2::new(90.0, 160.0),
-            egui::Sense::hover(),
-        );
-        
-        let rect = response.rect;
-        let center_y = rect.center().y;
-        
-        painter.rect_filled(
-            rect,
-            egui::CornerRadius::same(5),
-            egui::Color32::from_rgba_premultiplied(20, 20, 20, 200),
-        );
-        
-        let vs_step = 100.0;
-        let pixels_per_fpm = 0.8;
-        
-        let start_vs = ((vertical_speed - 500.0) / vs_step).floor() * vs_step;
-        let end_vs = start_vs + 1000.0;
-        
-        for vs in (start_vs as i32..=end_vs as i32).step_by(vs_step as usize) {
-            let offset = (vertical_speed - vs as f32) * pixels_per_fpm;
-            let y_pos = center_y + offset;
+        let num_ticks = 10;
+        for i in 0..=num_ticks {
+            let t = i as f32 / num_ticks as f32;
+            let angle = start_angle - angle_range * t;
+            let throttle_percent = t * 100.0;
             
-            if y_pos >= rect.top() && y_pos <= rect.bottom() {
-                let is_major = vs % 500 == 0;
-                let tick_len = if is_major { 25.0 } else { 15.0 };
-                
-                painter.line_segment(
-                    [
-                        egui::Pos2::new(rect.left(), y_pos),
-                        egui::Pos2::new(rect.left() + tick_len, y_pos),
-                    ],
-                    egui::Stroke::new(1.5, egui::Color32::WHITE),
+            let is_major = i % 2 == 0;
+            let tick_start = if is_major { radius - 12.0 } else { radius - 8.0 };
+            let tick_end = radius;
+            
+            let p1 = egui::Pos2::new(
+                center.x + tick_start * angle.cos(),
+                center.y - tick_start * angle.sin(),
+            );
+            let p2 = egui::Pos2::new(
+                center.x + tick_end * angle.cos(),
+                center.y - tick_end * angle.sin(),
+            );
+            
+            painter.line_segment(
+                [p1, p2],
+                egui::Stroke::new(1.5, egui::Color32::WHITE),
+            );
+            
+            if is_major {
+                let label_radius = radius - 20.0;
+                let label_pos = egui::Pos2::new(
+                    center.x + label_radius * angle.cos(),
+                    center.y - label_radius * angle.sin(),
                 );
                 
-                if is_major {
-                    painter.text(
-                        egui::Pos2::new(rect.right() - 5.0, y_pos),
-                        egui::Align2::RIGHT_CENTER,
-                        format!("{}", vs),
-                        egui::FontId::proportional(11.0),
-                        egui::Color32::WHITE,
-                    );
-                }
+                painter.text(
+                    label_pos,
+                    egui::Align2::CENTER_CENTER,
+                    format!("{:.0}", throttle_percent),
+                    egui::FontId::proportional(10.0),
+                    egui::Color32::WHITE,
+                );
             }
         }
         
-        let box_color = if vertical_speed > 50.0 {
-            egui::Color32::from_rgb(0, 100, 0)
-        } else if vertical_speed < -50.0 {
-            egui::Color32::from_rgb(100, 50, 0)
-        } else {
-            egui::Color32::from_rgb(50, 50, 50)
-        };
+        let throttle_angle = start_angle - angle_range * throttle;
         
-        painter.rect_filled(
-            egui::Rect::from_center_size(
-                egui::Pos2::new(rect.center().x, center_y),
-                egui::Vec2::new(80.0, 30.0),
-            ),
-            egui::CornerRadius::same(3),
-            box_color,
+        let needle_length = radius - 15.0;
+        let needle_tip = egui::Pos2::new(
+            center.x + needle_length * throttle_angle.cos(),
+            center.y - needle_length * throttle_angle.sin(),
         );
         
+        painter.line_segment(
+            [center, needle_tip],
+            egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 255, 100)),
+        );
+        
+        painter.circle_filled(center, 5.0, egui::Color32::from_rgb(100, 255, 100));
+        
         painter.text(
-            egui::Pos2::new(rect.center().x, center_y),
+            egui::Pos2::new(center.x, center.y - 25.0),
             egui::Align2::CENTER_CENTER,
-            format!("{:.0}", vertical_speed),
+            format!("{:.0}%", throttle * 100.0),
             egui::FontId::proportional(16.0),
             egui::Color32::WHITE,
         );
