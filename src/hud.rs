@@ -75,7 +75,7 @@ pub fn flight_hud_system(
             ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
             ui.vertical_centered(|ui| {
                 ui.label(egui::RichText::new("THROTTLE").size(12.0));
-                draw_throttle_gauge(ui, aircraft.throttle, aircraft.max_throttle);
+                draw_throttle_gauge(ui, aircraft.throttle, aircraft.max_throttle, aircraft.speed, aircraft.max_speed);
                 ui.horizontal(|ui| {
                     ui.label(format!("0{:?}", aircraft.throttle));
                 });
@@ -334,17 +334,27 @@ fn draw_altitude_tape(ui: &mut egui::Ui, altitude: f32) {
             }
         }
         
-        painter.rect_filled(
-            egui::Rect::from_center_size(
-                egui::Pos2::new(rect.center().x, center_y),
-                egui::Vec2::new(80.0, 30.0),
-            ),
-            egui::CornerRadius::same(3),
-            egui::Color32::from_rgb(100, 100, 100),
-        );
+        let arrow_width = 80.0;
+        let arrow_height = 30.0;
+        let arrow_tip_width = 10.0;
+        let center_x = rect.center().x;
+        
+        let arrow_points = vec![
+            egui::Pos2::new(center_x - arrow_width / 2.0, center_y - arrow_height / 2.0),
+            egui::Pos2::new(center_x + arrow_width / 2.0 - arrow_tip_width, center_y - arrow_height / 2.0),
+            egui::Pos2::new(center_x + arrow_width / 2.0, center_y),
+            egui::Pos2::new(center_x + arrow_width / 2.0 - arrow_tip_width, center_y + arrow_height / 2.0),
+            egui::Pos2::new(center_x - arrow_width / 2.0, center_y + arrow_height / 2.0),
+        ];
+        
+        painter.add(egui::Shape::convex_polygon(
+            arrow_points,
+            egui::Color32::from_rgb(40, 40, 40),
+            egui::Stroke::new(1.0, egui::Color32::WHITE),
+        ));
         
         painter.text(
-            egui::Pos2::new(rect.center().x, center_y),
+            egui::Pos2::new(center_x - 5.0, center_y),
             egui::Align2::CENTER_CENTER,
             format!("{:.0}", altitude),
             egui::FontId::proportional(18.0),
@@ -365,33 +375,38 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32, aircraft: &Aircraft) {
 
         let aircraft_max_speed = aircraft.max_speed;
         
-        let color = 
-        // Slow speed is red
-        if speed < aircraft.max_speed * 0.3 {
-            egui::Color32::from_rgb(150, 0, 0)
-        }
-        // Nearing slow speed is yellow
-        else if speed < aircraft_max_speed * 0.50 { 
-            egui::Color32::from_rgb(150, 150, 0)
-        }
-        // Good speed is white
-        else if speed < aircraft_max_speed * 0.90 {
-            egui::Color32::from_rgb(0, 150, 0)
-        }
-        // Too fast is Yellow
-        else if speed < aircraft_max_speed * 1.2 { 
-            egui::Color32::from_rgb(150, 150, 0)
-        }
-        // Too fast is red 
-        else {
-            egui::Color32::from_rgb(150, 0, 0)  
-        };
+        let speed_ranges = [
+            (0.0,                      aircraft_max_speed * 0.3, egui::Color32::from_rgb(150, 0, 0)),
+            (aircraft_max_speed * 0.3, aircraft_max_speed * 0.5, egui::Color32::from_rgb(200, 200, 0)),
+            (aircraft_max_speed * 0.5, aircraft_max_speed * 1.0, egui::Color32::from_rgb(0, 150, 0)),
+            (aircraft_max_speed * 1.0, aircraft_max_speed * 1.2, egui::Color32::from_rgb(200, 200, 0)),
+            (aircraft_max_speed * 1.2, aircraft_max_speed * 2.0, egui::Color32::from_rgb(150, 0, 0)),
+        ];
         
         let speed_step = 10.0;
         let pixels_per_knot = 1.5;
         
         let start_speed = ((speed - 100.0) / speed_step).floor() * speed_step;
         let end_speed = start_speed + 200.0;
+        
+        for (range_start, range_end, range_color) in speed_ranges.iter() {
+            let y_start = center_y + (speed - range_end) * pixels_per_knot;
+            let y_end = center_y + (speed - range_start) * pixels_per_knot;
+            
+            if y_end > rect.top() && y_start < rect.bottom() {
+                let y_start_clamped = y_start.max(rect.top());
+                let y_end_clamped = y_end.min(rect.bottom());
+                
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::Pos2::new(rect.left(), y_start_clamped),
+                        egui::Pos2::new(rect.left() + 10.0, y_end_clamped),
+                    ),
+                    egui::CornerRadius::ZERO,
+                    *range_color,
+                );
+            }
+        }
         
         for spd in (start_speed as i32..=end_speed as i32).step_by(speed_step as usize) {
             if spd < 0 { continue; }
@@ -405,8 +420,8 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32, aircraft: &Aircraft) {
                 
                 painter.line_segment(
                     [
-                        egui::Pos2::new(rect.left(), y_pos),
-                        egui::Pos2::new(rect.left() + tick_len, y_pos),
+                        egui::Pos2::new(rect.left() + 5.0, y_pos),
+                        egui::Pos2::new(rect.left() + 5.0 + tick_len, y_pos),
                     ],
                     egui::Stroke::new(1.5, egui::Color32::WHITE),
                 );
@@ -423,17 +438,27 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32, aircraft: &Aircraft) {
             }
         }
         
-        painter.rect_filled(
-            egui::Rect::from_center_size(
-                egui::Pos2::new(rect.center().x, center_y),
-                egui::Vec2::new(80.0, 30.0),
-            ),
-            egui::CornerRadius::same(3),
-            color,
-        );
+        let arrow_width = 80.0;
+        let arrow_height = 30.0;
+        let arrow_tip_width = 10.0;
+        let center_x = rect.center().x;
+        
+        let arrow_points = vec![
+            egui::Pos2::new(center_x - arrow_width / 2.0 + arrow_tip_width, center_y - arrow_height / 2.0),
+            egui::Pos2::new(center_x + arrow_width / 2.0, center_y - arrow_height / 2.0),
+            egui::Pos2::new(center_x + arrow_width / 2.0, center_y + arrow_height / 2.0),
+            egui::Pos2::new(center_x - arrow_width / 2.0 + arrow_tip_width, center_y + arrow_height / 2.0),
+            egui::Pos2::new(center_x - arrow_width / 2.0, center_y),
+        ];
+        
+        painter.add(egui::Shape::convex_polygon(
+            arrow_points,
+            egui::Color32::from_rgb(40, 40, 40),
+            egui::Stroke::new(1.0, egui::Color32::WHITE),
+        ));
         
         painter.text(
-            egui::Pos2::new(rect.center().x, center_y),
+            egui::Pos2::new(center_x + 5.0, center_y),
             egui::Align2::CENTER_CENTER,
             format!("{:.0}", speed),
             egui::FontId::proportional(18.0),
@@ -442,7 +467,7 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32, aircraft: &Aircraft) {
     });
 }
 
-fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32) {
+fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32, speed: f32, max_speed: f32) {
     ui.vertical_centered(|ui| {
         let (response, painter) = ui.allocate_painter(
             egui::Vec2::new(140.0, 90.0),
@@ -450,8 +475,8 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32) {
         );
         
         let rect = response.rect;
-        let center = egui::Pos2::new(rect.center().x, rect.bottom() - 5.0);
         let radius = 60.0;
+        let center = egui::Pos2::new(rect.center().x, rect.top() + radius + 5.0);
         
         let start_angle = std::f32::consts::PI;
         let end_angle = 0.0;
@@ -568,7 +593,7 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32) {
         let needle_color = if throttle > 1.0 {
             egui::Color32::from_rgb(255, 100, 100)
         } else {
-            egui::Color32::from_rgb(100, 255, 100)
+            egui::Color32::from_rgb(200, 255, 200)
         };
         
         let needle_length = radius - 15.0;
@@ -584,9 +609,27 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32) {
         
         painter.circle_filled(center, 5.0, needle_color);
         
+        let speed_ratio = (speed / max_speed).min(max_throttle);
+        let speed_angle = start_angle - angle_range * (speed_ratio / max_throttle);
+        
+        let speed_needle_length = (radius - 15.0) * 0.75;
+        let speed_needle_tip = egui::Pos2::new(
+            center.x + speed_needle_length * speed_angle.cos(),
+            center.y - speed_needle_length * speed_angle.sin(),
+        );
+        
+        let speed_needle_color = egui::Color32::WHITE;
+        
+        painter.line_segment(
+            [center, speed_needle_tip],
+            egui::Stroke::new(2.0, speed_needle_color),
+        );
+        
+        painter.circle_filled(center, 3.0, speed_needle_color);
+        
         painter.text(
-            egui::Pos2::new(center.x, center.y - 25.0),
-            egui::Align2::CENTER_CENTER,
+            egui::Pos2::new(center.x, center.y + 10.0),
+            egui::Align2::CENTER_TOP,
             format!("{:.0}%", throttle * 100.0),
             egui::FontId::proportional(16.0),
             egui::Color32::WHITE,

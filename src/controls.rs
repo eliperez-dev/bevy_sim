@@ -45,7 +45,7 @@ impl Default for Aircraft {
             max_throttle: 1.5,
             drag_factor: 0.5,
             gravity: 150.0,       
-            g_force_drag: 5.0,
+            g_force_drag: 0.3,
             pitch_strength: 2.0,
             roll_strength: 3.0,
             yaw_strength: 1.0,
@@ -88,7 +88,7 @@ impl Default for Wind {
     fn default() -> Self {
         Self {
             base_wind: Vec3::new(10.0, 0.0, 5.0),
-            turbulence_intensity: 0.003,
+            turbulence_intensity: 0.008,
             turbulence_frequency: 4.0,
             perlin: Perlin::new(42),
         }
@@ -162,7 +162,7 @@ pub fn camera_controls(
         let airspeed_ratio = aircraft.speed / aircraft.max_speed;
         
         let control_effectiveness = if airspeed_ratio > 1.0 {
-            dbg!((1.0 / (airspeed_ratio.powf(3.0))).clamp(0.2, 1.0))
+            (1.0 / (airspeed_ratio.powf(5.0))).clamp(0.2, 1.0)
         } else {
             airspeed_ratio.clamp(0.0, 1.0)
         };
@@ -231,10 +231,10 @@ pub fn camera_controls(
         let freq = wind.turbulence_frequency as f64;
         
         let turbulence_pitch = wind.perlin.get([pos.x as f64 * freq, pos.z as f64 * freq, t * freq]) as f32;
-        let turbulence_roll = wind.perlin.get([pos.z as f64 * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32;
+        let turbulence_roll = wind.perlin.get([pos.z as f64 * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32 / 2.0;
         let turbulence_yaw = wind.perlin.get([pos.y as f64 * freq, pos.x as f64 * freq, t * freq + 200.0]) as f32;
         
-        let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(8.0);
+        let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(6.0);
         aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
         aircraft.roll_velocity += turbulence_roll * turbulence_scale * dt;
         aircraft.yaw_velocity += turbulence_yaw * turbulence_scale * dt;

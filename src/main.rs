@@ -334,7 +334,7 @@ pub fn debugger_ui(
             ui.collapsing("Current Values", |ui| {
                 let airspeed_ratio = aircraft.speed / aircraft.max_speed;
                 let control_effectiveness = if airspeed_ratio > 1.0 {
-                    (1.0 / airspeed_ratio).clamp(0.3, 1.0)
+                    (1.0 / (airspeed_ratio.powf(5.0))).clamp(0.2, 1.0)
                 } else {
                     airspeed_ratio.clamp(0.0, 1.0)
                 };
