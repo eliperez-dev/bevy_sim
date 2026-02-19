@@ -95,6 +95,14 @@ impl Default for Wind {
     }
 }
 
+pub fn get_control_effectiveness(airspeed_ratio: f32) -> f32 {
+    if airspeed_ratio > 1.0 {
+        (1.0 / (airspeed_ratio.powf(3.0))).clamp(0.3, 1.0)
+    } else {
+        (1.0 - ( 1.0 - airspeed_ratio).powf(3.0)).clamp(0.0, 1.0)
+    }
+}
+
 pub fn camera_controls(
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -152,7 +160,7 @@ pub fn camera_controls(
         let wind_acceleration = wind_dot * wind.base_wind.length() * 0.3;
 
         // E. Quadratic drag (increases with speed²)
-        let speed_drag = (aircraft.speed / aircraft.max_speed).powi(2) * 20.0;
+        let speed_drag = (aircraft.speed / aircraft.max_speed).powi(2) * 5.0;
 
         // Apply all accelerations
         aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag - speed_drag + wind_acceleration) * dt;
@@ -160,13 +168,8 @@ pub fn camera_controls(
 
         // 2. AERODYNAMICS
         let airspeed_ratio = aircraft.speed / aircraft.max_speed;
-        
-        let control_effectiveness = if airspeed_ratio > 1.0 {
-            (1.0 / (airspeed_ratio.powf(5.0))).clamp(0.2, 1.0)
-        } else {
-            airspeed_ratio.clamp(0.0, 1.0)
-        };
-        
+        let control_effectiveness = get_control_effectiveness(airspeed_ratio);
+
         let pitch_strength = aircraft.pitch_strength * control_effectiveness;
         let roll_strength = aircraft.roll_strength * control_effectiveness;
         let yaw_strength = aircraft.yaw_strength * control_effectiveness;
@@ -231,13 +234,21 @@ pub fn camera_controls(
         let freq = wind.turbulence_frequency as f64;
         
         let turbulence_pitch = wind.perlin.get([pos.x as f64 * freq, pos.z as f64 * freq, t * freq]) as f32;
-        let turbulence_roll = wind.perlin.get([pos.z as f64 * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32 / 2.0;
-        let turbulence_yaw = wind.perlin.get([pos.y as f64 * freq, pos.x as f64 * freq, t * freq + 200.0]) as f32;
+        let turbulence_roll = wind.perlin.get([pos.z as f64 * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32 / 1.5;
+        let turbulence_yaw = wind.perlin.get([pos.y as f64 * freq, pos.x as f64 * freq, t * freq + 200.0]) as f32 / 1.35;
         
         let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(6.0);
         aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
         aircraft.roll_velocity += turbulence_roll * turbulence_scale * dt;
         aircraft.yaw_velocity += turbulence_yaw * turbulence_scale * dt;
+
+        let gust_freq = freq * 0.0005;
+        let turbulence_velocity_x = wind.perlin.get([pos.x as f64 * gust_freq, t * gust_freq, pos.z as f64 * gust_freq + 300.0]) as f32;
+        let turbulence_velocity_y = wind.perlin.get([pos.y as f64 * gust_freq, t * gust_freq, pos.x as f64 * gust_freq + 400.0]) as f32;
+        let turbulence_velocity_z = wind.perlin.get([pos.z as f64 * gust_freq, t * gust_freq, pos.y as f64 * gust_freq + 500.0]) as f32;
+        
+        let turbulence_force = Vec3::new(turbulence_velocity_x, turbulence_velocity_y, turbulence_velocity_z);
+        let turbulence_velocity_scale = wind.turbulence_intensity * 100.0 * (airspeed_ratio + 0.5).powf(1.5);
 
         // --- DAMPING & MOVEMENT (Always applies) ---
         aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
@@ -258,6 +269,7 @@ pub fn camera_controls(
         movement.y -= gravity_strength * gravity_factor;
         
         movement += wind.base_wind * 0.5;
+        movement += turbulence_force * turbulence_velocity_scale;
 
         plane_transform.translation += movement * dt;
         }

@@ -333,18 +333,13 @@ pub fn debugger_ui(
         if let Ok(mut aircraft) = aircraft_query.single_mut() {
             ui.collapsing("Current Values", |ui| {
                 let airspeed_ratio = aircraft.speed / aircraft.max_speed;
-                let control_effectiveness = if airspeed_ratio > 1.0 {
-                    (1.0 / (airspeed_ratio.powf(5.0))).clamp(0.2, 1.0)
-                } else {
-                    airspeed_ratio.clamp(0.0, 1.0)
-                };
                 let centripetal_accel = aircraft.speed * aircraft.pitch_velocity.abs();
                 let g_force = centripetal_accel / 9.8;
                 let turn_drag = g_force * aircraft.g_force_drag;
                 let speed_drag = (airspeed_ratio).powi(2) * 20.0;
                 
                 ui.label(format!("Speed: {:.1} ({:.0}%)", aircraft.speed, airspeed_ratio * 100.0));
-                ui.label(format!("Control Effectiveness: {:.0}%", control_effectiveness * 100.0));
+                ui.label(format!("Control Effectiveness: {:.0}%", controls::get_control_effectiveness(airspeed_ratio) * 100.0));
                 ui.label(format!("Pitch Velocity: {:.3}", aircraft.pitch_velocity));
                 ui.label(format!("G-Force: {:.2}G", g_force));
                 ui.label(format!("Turn Drag: {:.2}", turn_drag));
@@ -402,7 +397,7 @@ pub fn debugger_ui(
             
             ui.separator();
             ui.label("Turbulence");
-            ui.add(egui::Slider::new(&mut wind.turbulence_intensity, 0.0..=3.0).text("Intensity").logarithmic(true));
+            ui.add(egui::Slider::new(&mut wind.turbulence_intensity, 0.0..=2.0).text("Intensity").logarithmic(true));
             ui.add(egui::Slider::new(&mut wind.turbulence_frequency, 0.01..=10.0).text("Frequency"));
         });
         ui.separator();
