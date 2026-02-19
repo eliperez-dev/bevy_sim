@@ -17,11 +17,13 @@ use world_generation::*;
 use consts::*;
 use day_cycle::*;
 use controls::*;
+use hud::*;
 
 mod world_generation;
 mod consts;
 mod day_cycle;
 mod controls;
+mod hud;
 
 
 fn main() {
@@ -90,7 +92,7 @@ fn main() {
                 (3.0, 1),
             ],
             lod_quality_multiplier: 2,
-            lod_distance_multiplier: 7.5,
+            lod_distance_multiplier: 10.0,
         })
         .insert_resource(RenderSettings {
             cascades: 1,
@@ -106,9 +108,10 @@ fn main() {
             inclination: -1.0,     
         })
         .init_resource::<ControlMode>()
+        .init_resource::<VerticalSpeedTracker>()
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, setup_camera_system)
-        .add_systems(EguiPrimaryContextPass, debugger_ui)
+        .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
         .add_systems(Startup, (setup, setup_camera_fog, spawn_stars).chain())
         .add_systems(Update, (
             camera_controls, 

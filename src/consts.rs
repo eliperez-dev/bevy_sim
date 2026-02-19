@@ -43,3 +43,4 @@ pub const FOREST_TERRAIN_LEVELS: &[TerrainStop] = &[
     TerrainStop { height: 2.0,  color: Color::srgb(0.4, 0.4, 0.4) }, // Rock
     TerrainStop { height: 3.0,  color: Color::WHITE },               // Snow
 ];
+
