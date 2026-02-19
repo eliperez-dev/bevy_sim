@@ -18,6 +18,7 @@ pub struct Aircraft {
 
     // --- TUNING ---
     pub max_speed: f32,
+    pub max_throttle: f32,       // Maximum throttle (1.0 = 100%, 1.3 = 130%)
     pub drag_factor: f32,        // How fast engine reaches target speed
     pub gravity: f32,            // How much climbing slows you / diving speeds you up
     pub g_force_drag: f32,       // Speed loss when turning hard
@@ -41,6 +42,7 @@ impl Default for Aircraft {
 
             // Default Physics Values
             max_speed: 350.0,
+            max_throttle: 1.5,
             drag_factor: 0.5,
             gravity: 150.0,       
             g_force_drag: 5.0,
@@ -125,7 +127,7 @@ pub fn camera_controls(
         if let Ok((mut plane_transform, mut aircraft)) = aircraft_query.single_mut() {
         // 1. ENGINE & DRAG
         if keyboard.pressed(KeyCode::Equal) {
-            aircraft.throttle = (aircraft.throttle + 0.5 * dt).min(1.3);
+            aircraft.throttle = (aircraft.throttle + 0.5 * dt).min(aircraft.max_throttle);
         }
         if keyboard.pressed(KeyCode::Minus) {
             aircraft.throttle = (aircraft.throttle - 0.5 * dt).max(0.0);

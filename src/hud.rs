@@ -75,7 +75,7 @@ pub fn flight_hud_system(
             ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
             ui.vertical_centered(|ui| {
                 ui.label(egui::RichText::new("THROTTLE").size(12.0));
-                draw_throttle_gauge(ui, aircraft.throttle);
+                draw_throttle_gauge(ui, aircraft.throttle, aircraft.max_throttle);
                 ui.horizontal(|ui| {
                     ui.label(format!("0{:?}", aircraft.throttle));
                 });
@@ -442,7 +442,7 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32, aircraft: &Aircraft) {
     });
 }
 
-fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
+fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32) {
     ui.vertical_centered(|ui| {
         let (response, painter) = ui.allocate_painter(
             egui::Vec2::new(140.0, 90.0),
@@ -465,7 +465,7 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
             let angle1 = start_angle - angle_range * t1;
             let angle2 = start_angle - angle_range * t2;
             
-            let color = if t1 > (1.0 / 1.3) {
+            let color = if t1 > (1.0 / max_throttle) {
                 egui::Color32::from_rgb(60, 20, 20)
             } else {
                 egui::Color32::from_rgb(40, 40, 40)
@@ -496,11 +496,11 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
             ));
         }
         
-        let num_ticks = 13;
+        let num_ticks = (max_throttle * 10.0) as i32;
         for i in 0..=num_ticks {
             let t = i as f32 / num_ticks as f32;
             let angle = start_angle - angle_range * t;
-            let throttle_percent = t * 130.0;
+            let throttle_percent = t * max_throttle * 100.0;
             
             let is_major = i % 2 == 0;
             let tick_start = if is_major { radius - 12.0 } else { radius - 8.0 };
@@ -543,7 +543,7 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
             }
         }
         
-        let redline_t = 1.0 / 1.3;
+        let redline_t = 1.0 / max_throttle;
         let redline_angle = start_angle - angle_range * redline_t;
         let redline_start = radius - 15.0;
         let redline_end = radius + 3.0;
@@ -562,8 +562,8 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
             egui::Stroke::new(3.0, egui::Color32::from_rgb(255, 0, 0)),
         );
         
-        let throttle_clamped = throttle.min(1.3);
-        let throttle_angle = start_angle - angle_range * (throttle_clamped / 1.3);
+        let throttle_clamped = throttle.min(max_throttle);
+        let throttle_angle = start_angle - angle_range * (throttle_clamped / max_throttle);
         
         let needle_color = if throttle > 1.0 {
             egui::Color32::from_rgb(255, 100, 100)
