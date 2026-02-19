@@ -83,14 +83,14 @@ fn main() {
             last_camera_chunk: None,
             to_spawn: Vec::new(),
             lod_to_update: Vec::new(),
-            render_distance: 35,
+            render_distance: 40,
             lod_levels: [
                 (1.0 , 4),
                 (2.0, 2),
                 (3.0, 1),
             ],
             lod_quality_multiplier: 2,
-            lod_distance_multiplier: 15.0,
+            lod_distance_multiplier: 7.5,
         })
         .insert_resource(RenderSettings {
             cascades: 1,
@@ -207,7 +207,7 @@ fn setup(
     // 1. Create a "parent" entity for the physics/logic
     let plane_entity = commands.spawn((
         Aircraft::default(),
-        Transform::from_xyz(0.0, 700.0, 0.0).with_scale(Vec3::splat(0.1)),
+        Transform::from_xyz(0.0, 1200.0, 0.0).with_scale(Vec3::splat(0.1)),
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();
@@ -275,23 +275,76 @@ fn update_debugger(
     chunks: Res<ChunkManager>,
     cycle: Res<DayNightCycle>,
     control_mode: Res<ControlMode>,
+    // Note: Assuming 'Debugger' wraps a Text component directly or via a tuple struct
+    // Based on your snippet: &mut debugger.single_mut().unwrap().0
     mut debugger: Query<&mut Text, With<Debugger>>,
+    // Optional: Add Aircraft query if you want to show Speed/Throttle in the overlay text too
+    aircraft_query: Query<&Aircraft>, 
 ) {
-    let cam_trans = camera.single().unwrap().translation;
-    let camera_pos_arr = &[cam_trans.x, cam_trans.y, cam_trans.z];
-    let biome = world.get_biome(camera_pos_arr);
-    let message = &mut debugger.single_mut().unwrap().0;
+    let Ok(camera_transform) = camera.single() else { return };
+    let cam_trans = camera_transform.translation;
+    let camera_pos_arr = [cam_trans.x, cam_trans.y, cam_trans.z];
+    
+    let biome = world.get_biome(&camera_pos_arr);
+    let climate = world.get_climate(&camera_pos_arr);
 
-    let climate = world.get_climate(camera_pos_arr);
+    // Access the String inside the Text section
+    // (Adjust .sections[0].value if using standard Text, or .0 if using a tuple struct wrapper)
+    let Ok(mut text_component) = debugger.single_mut() else { return };
+    let message = &mut text_component.0; 
+    // ^ NOTE: If your Debugger struct is `struct Debugger(pub String)`, use .0. 
+    // If it is a Component on a Text bundle, use .sections[0].value.
+    // Based on your snippet `unwrap().0`, I will assume you have a wrapper component, 
+    // but usually Text is modified via sections. I will use your snippet's style:
+    // let message = &mut debugger.single_mut().unwrap().0; 
+    
+    // However, standard Bevy Text modification looks like this:
+    // let message = &mut debugger.single_mut().sections[0].value;
 
     message.clear();
 
+    // --- GENERAL STATS ---
     message.push_str(&format!("Mode: {:?} (Press F to toggle)\n", control_mode.mode));
-    message.push_str(&format!("Position: [{:.2}, {:.2}, {:.2}]\n", cam_trans.x, cam_trans.y, cam_trans.z));
-    message.push_str(&format!("Biome: {:?} Climate: {:?}\n", biome, climate));
-    message.push_str(&format!("Chunks: {:?}\n", chunks.spawned_chunks.len()));
-    message.push_str(&format!("Time of Day: {:.2}\n", cycle.time_of_day)); 
+    message.push_str(&format!("Position: [{:.0}, {:.0}, {:.0}]\n", cam_trans.x, cam_trans.y, cam_trans.z));
+    message.push_str(&format!("Biome: {:?} | Climate: {:?}\n", biome, climate));
+    message.push_str(&format!("Chunks: {} | Time: {:.2}\n", chunks.spawned_chunks.len(), cycle.time_of_day));
+
+    // --- FLIGHT STATS (If available) ---
+    if control_mode.mode == FlightMode::Aircraft {
+        if let Ok(aircraft) = aircraft_query.single() {
+            message.push_str(&format!("\n--- AIRCRAFT ---\n"));
+            message.push_str(&format!("Speed: {:.0} (Max: {:.0})\n", aircraft.speed, aircraft.max_speed));
+            message.push_str(&format!("Throttle: {:.0}%\n", aircraft.throttle * 100.0));
+            message.push_str(&format!("Alt: {:.0}\n", cam_trans.y));
+        }
+    }
+
+    // --- CONTROLS ---
+    message.push_str("\n--- CONTROLS ---\n");
+    message.push_str("T: Toggle Wireframe\n");
+    
+    match control_mode.mode {
+        FlightMode::FreeFlight => {
+            message.push_str("WASD: Move Horizontal\n");
+            message.push_str("Q / E: Up / Down\n");
+            message.push_str("Shift: Turbo Speed\n");
+            message.push_str("Arrows: Look Around\n");
+            message.push_str("Z / X: Roll Camera\n");
+        },
+        FlightMode::Aircraft => {
+            message.push_str("W / S: Pitch Down/Up\n");
+            message.push_str("A / D: Roll (Turn)\n");
+            message.push_str("Q / E: Yaw (Rudder)\n");
+            message.push_str("+ / -: Throttle\n");
+            message.push_str("(Physics Enabled: Stalls & Gravity)\n");
+        }
+    }
 }
+
+
+
+
+
 pub fn debugger_ui(
     mut contexts: EguiContexts,
     mut day_cycle: ResMut<DayNightCycle>,
@@ -300,27 +353,26 @@ pub fn debugger_ui(
     mut world_settings: ResMut<WorldGenerationSettings>,
     mut fog_query: Query<&mut DistanceFog, With<MainCamera>>,
     mut render_settings: ResMut<RenderSettings>,
-    // ADDED: Access to the aircraft component
     mut aircraft_query: Query<&mut Aircraft, Without<MainCamera>>,
-) -> Result<(), > { // Note: Changed Result return type signature slightly for safety
+) -> Result<(), > { 
     
     egui::Window::new("Debugger").show(contexts.ctx_mut()?, |ui| {
         render_settings.just_updated = false;
 
         // --- AIRCRAFT SETTINGS ---
-        // We put this at the top since it's what you are currently working on
         ui.heading("Aircraft Physics");
         if let Ok(mut aircraft) = aircraft_query.single_mut() {
             ui.horizontal(|ui| {
                 ui.label(format!("Speed: {:.0}", aircraft.speed));
-                ui.add(egui::ProgressBar::new(aircraft.speed / aircraft.max_speed));
+                ui.add(egui::ProgressBar::new(aircraft.speed / 400.0)); // 400 is arbitrary view scale
             });
             ui.label(format!("Throttle: {:.0}%", aircraft.throttle * 100.0));
 
             ui.collapsing("Flight Model Tuning", |ui| {
                 ui.label("Forces");
-                ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed"));
+                ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed (Level)"));
                 ui.add(egui::Slider::new(&mut aircraft.drag_factor, 0.1..=2.0).text("Drag (Acceleration)"));
+                ui.add(egui::Slider::new(&mut aircraft.gravity, 0.0..=100.0).text("Gravity (Climb/Dive Effect)"));
                 ui.add(egui::Slider::new(&mut aircraft.g_force_drag, 0.0..=500.0).text("Turn Drag (Energy Bleed)"));
 
                 ui.separator();
@@ -339,7 +391,7 @@ pub fn debugger_ui(
         }
         ui.separator();
 
-        // --- WORLD GEN SETTINGS (Previous code) ---
+        // --- WORLD GEN SETTINGS ---
         ui.heading("Time Settings");
         ui.add(egui::Slider::new(&mut day_cycle.time_of_day, 0.0..=1.0).text("Time of Day"));
         ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.1).text("Time Speed"));
@@ -384,7 +436,6 @@ pub fn debugger_ui(
 
         if ui.button("Reset Simulation").clicked() {
             day_cycle.time_of_day = 0.5;
-            // Also reset plane speed if needed
             if let Ok(mut aircraft) = aircraft_query.single_mut() {
                 aircraft.speed = 100.0;
                 aircraft.throttle = 0.5;

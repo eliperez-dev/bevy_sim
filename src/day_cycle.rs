@@ -45,7 +45,8 @@ pub fn update_daylight_cycle(
     if let Ok((mut transform, mut light)) = sun_query.single_mut() {
         transform.rotation = final_rotation; 
         
-        let horizon_factor = (1.0 - (up_dot.abs() / 0.30)).clamp(0.0, 1.0);
+        let sunset_horizon_factor = (1.0 - (up_dot.abs() / 0.34)).clamp(0.0, 1.0);
+        let star_horizon_factor = (1.0 - (up_dot.abs() / 0.24)).clamp(0.0, 1.0);
         light.illuminance = daylight * MAX_ILLUMANENCE;
 
         if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
@@ -58,7 +59,7 @@ pub fn update_daylight_cycle(
             let sunset_fog = Vec3::new(0.90, 0.45, 0.2);
             
             let base_fog = night_fog.lerp(day_fog, daylight);
-            let current_fog = base_fog.lerp(sunset_fog, horizon_factor);
+            let current_fog = base_fog.lerp(sunset_fog, sunset_horizon_factor);
             
             let final_color = Color::srgb(current_fog.x, current_fog.y, current_fog.z);
             fog.color = final_color;
@@ -127,7 +128,7 @@ pub fn spawn_stars(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let num_stars = 300;
+    let num_stars = 500;
 
     for _ in 0..num_stars {
         let phi = rand::random::<f32>() * std::f32::consts::TAU;

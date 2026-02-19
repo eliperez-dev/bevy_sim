@@ -1,10 +1,11 @@
 use bevy::{
     pbr::wireframe::WireframeConfig,
-    prelude::*
+    prelude::*,
 };
 
 #[derive(Component)]
 pub struct MainCamera;
+
 #[derive(Component)]
 pub struct Aircraft {
     // --- STATE ---
@@ -14,42 +15,42 @@ pub struct Aircraft {
     pub roll_velocity: f32,
     pub yaw_velocity: f32,
 
-    // --- TUNING (The sliders we want to tweak) ---
+    // --- TUNING ---
     pub max_speed: f32,
-    pub drag_factor: f32,        // Air resistance
-    pub g_force_drag: f32,       // Speed loss when turning
+    pub drag_factor: f32,        // How fast engine reaches target speed
+    pub gravity: f32,            // How much climbing slows you / diving speeds you up
+    pub g_force_drag: f32,       // Speed loss when turning hard
     
     pub pitch_strength: f32,
     pub roll_strength: f32,
     pub yaw_strength: f32,
     
-    pub bank_turn_strength: f32, // How much rolling automatically turns the plane
-    pub auto_level_strength: f32,// How fast it levels out when letting go
+    pub bank_turn_strength: f32, // Auto-yaw when banking
+    pub auto_level_strength: f32,// Stability
 }
 
 impl Default for Aircraft {
     fn default() -> Self {
         Self {
-            speed: 0.0,
-            throttle: 0.0,
+            speed: 150.0,
+            throttle: 0.80,
             pitch_velocity: 0.0,
             roll_velocity: 0.0,
             yaw_velocity: 0.0,
 
             // Default Physics Values
-            max_speed: 265.0,
-            drag_factor: 0.7,
-            g_force_drag: 220.0,
+            max_speed: 350.0,
+            drag_factor: 0.5,
+            gravity: 150.0,       
+            g_force_drag: 100.0,
             pitch_strength: 2.0,
             roll_strength: 3.0,
             yaw_strength: 1.0,
             bank_turn_strength: 0.5,
-            auto_level_strength: 0.4,
+            auto_level_strength: 1.0,
         }
     }
 }
-
-
 
 #[derive(Resource)]
 pub struct ControlMode {
@@ -94,11 +95,11 @@ pub fn camera_controls(
 
     match control_mode.mode {
         FlightMode::FreeFlight => {
-            // --- FREE FLIGHT (Standard FPS/Debug Cam) ---
+            // --- FREE FLIGHT (FPS Cam) ---
             let Ok(mut camera_transform) = camera_query.single_mut() else { return };
             
-            let rotation_speed = 0.5;
-            let pan_speed = if keyboard.pressed(KeyCode::ShiftLeft) { 50.0 } else { 10.0 };
+            let rotation_speed = 0.7;
+            let pan_speed = if keyboard.pressed(KeyCode::ShiftLeft) { 5000.0 } else { 50.0 };
             
             let forward = camera_transform.forward().as_vec3();
             let right = camera_transform.right().as_vec3();
@@ -118,6 +119,8 @@ pub fn camera_controls(
             if keyboard.pressed(KeyCode::ArrowRight) { camera_transform.rotate_y(-panning_delta); }
             if keyboard.pressed(KeyCode::ArrowUp) { camera_transform.rotate_local_x(panning_delta); }
             if keyboard.pressed(KeyCode::ArrowDown) { camera_transform.rotate_local_x(-panning_delta); }
+            if keyboard.pressed(KeyCode::KeyZ) { camera_transform.rotate_local_z(panning_delta); }
+            if keyboard.pressed(KeyCode::KeyX) { camera_transform.rotate_local_z(-panning_delta); }
 
             camera_transform.translation += pan_direction.normalize_or_zero() * pan_speed * dt;
         }
@@ -133,21 +136,31 @@ pub fn camera_controls(
                 aircraft.throttle = (aircraft.throttle - 0.5 * dt).max(0.0);
             }
 
-            let max_speed = aircraft.max_speed;
-            let drag_factor = aircraft.drag_factor; 
-            let g_force_drag = aircraft.g_force_drag;
+            // A. Engine Acceleration
+            let target_speed = aircraft.throttle * aircraft.max_speed;
+            // Move speed towards target speed (engine vs air resistance)
+            let engine_acceleration = (target_speed - aircraft.speed) * aircraft.drag_factor;
             
-            let target_speed = aircraft.throttle * max_speed;
-            
-            // Drag from turning hard
-            let cornering_penalty = aircraft.pitch_velocity.abs() * g_force_drag * dt;
-            aircraft.speed = (aircraft.speed - cornering_penalty).max(0.0);
+            // B. Climb/Dive Acceleration (Gravity)
+            // forward.y is 1.0 when going UP, -1.0 when going DOWN.
+            // If going UP (1.0), we want negative acceleration (Slow down).
+            // If going DOWN (-1.0), we want positive acceleration (Speed up).
+            let climb_angle = plane_transform.forward().y;
+            let gravity_acceleration = -climb_angle * aircraft.gravity;
 
-            // Engine power vs Air Resistance
-            aircraft.speed = aircraft.speed + (target_speed - aircraft.speed) * drag_factor * dt;
+            // C. Induced Drag (Turning slows you down)
+            let turn_drag = aircraft.pitch_velocity.abs() * aircraft.g_force_drag;
+
+            // Apply all accelerations
+            aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag) * dt;
+            
+            // Safety clamp (prevent flying backwards for now)
+            aircraft.speed = aircraft.speed.max(0.0);
+
 
             // 2. AERODYNAMICS
-            let airspeed_ratio = (aircraft.speed / max_speed).clamp(0.0, 1.0);
+            // Effectiveness of controls depends on speed
+            let airspeed_ratio = (aircraft.speed / aircraft.max_speed).clamp(0.0, 1.0);
             
             let pitch_strength = aircraft.pitch_strength * airspeed_ratio;
             let roll_strength = aircraft.roll_strength * airspeed_ratio;
@@ -173,23 +186,18 @@ pub fn camera_controls(
             if keyboard.pressed(KeyCode::KeyE) { aircraft.yaw_velocity -= yaw_strength * dt; }
 
             // --- STABILITY & AUTO-CORRECTION ---
-            
-            // Calculate Bank Angle (Right vector Y component)
-            // If > 0, we are banked Left. If < 0, we are banked Right.
             let bank_angle = plane_transform.right().y; 
 
             // A. Auto-Yaw (Coordinated Turn)
-            // Reduced multiplier from 1.5 to 0.5 for gentler turns
             aircraft.yaw_velocity += bank_angle * aircraft.bank_turn_strength * airspeed_ratio * dt;
 
+            // B. Auto-Level (Self-Righting Stability)
             if !is_rolling {
                 let auto_level_force = -bank_angle * aircraft.auto_level_strength * airspeed_ratio;
                 aircraft.roll_velocity += auto_level_force * dt;
             }
 
             // --- DAMPING & MOVEMENT ---
-
-            // Apply Damping 
             aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
             aircraft.roll_velocity -= aircraft.roll_velocity * rotational_damping * dt;
             aircraft.yaw_velocity -= aircraft.yaw_velocity * rotational_damping * dt;
@@ -199,9 +207,10 @@ pub fn camera_controls(
             plane_transform.rotate_local_z(aircraft.roll_velocity * dt);
             plane_transform.rotate_local_y(aircraft.yaw_velocity * dt);
 
-            // Apply Lift vs Gravity
+            // Apply Lift vs Gravity (Vertical position)
             let forward = plane_transform.forward().as_vec3();
             let lift_threshold = 150.0;
+            // Gravity affecting POSITION (falling out of sky), distinct from SPEED
             let gravity_strength = 30.0;
             let gravity_factor = (1.0 - (aircraft.speed / lift_threshold)).max(0.0);
             
@@ -233,13 +242,13 @@ pub fn camera_follow_aircraft(
     let base_distance = 18.0;
     let max_extra_dist = 4.0;
     let speed_threshold = 100.0;
-    let height = 6.0;
-    let look_ahead_distance = 20.0;
+    let height = 8.0;
+    let look_ahead_distance = 50.0;
     
     let speed_ratio = (aircraft.speed / speed_threshold).clamp(0.0, 2.0);
     let dynamic_distance = base_distance + (max_extra_dist * speed_ratio.powf(0.5));
 
-    let smoothness = 5.0 + (speed_ratio * 2.0);
+    let smoothness = 2.0 + (speed_ratio * 1.5);
     let t = (time.delta_secs() * smoothness).min(1.0);
 
     let target_position = plane_transform.translation 
