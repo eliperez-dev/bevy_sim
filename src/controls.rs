@@ -46,8 +46,8 @@ impl Default for Aircraft {
             pitch_strength: 2.0,
             roll_strength: 3.0,
             yaw_strength: 1.0,
-            bank_turn_strength: 0.5,
-            auto_level_strength: 1.0,
+            bank_turn_strength: 0.85,
+            auto_level_strength: 0.45,
         }
     }
 }
@@ -55,6 +55,7 @@ impl Default for Aircraft {
 #[derive(Resource)]
 pub struct ControlMode {
     pub mode: FlightMode,
+    pub physics_paused: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,6 +68,7 @@ impl Default for ControlMode {
     fn default() -> Self {
         Self {
             mode: FlightMode::Aircraft,
+            physics_paused: false,
         }
     }
 }
@@ -92,14 +94,116 @@ pub fn camera_controls(
     if keyboard.just_pressed(KeyCode::KeyT) {
         wire_frame.global = !wire_frame.global;
     }
+    if keyboard.just_pressed(KeyCode::KeyP) {
+        control_mode.physics_paused = !control_mode.physics_paused;
+        info!("Physics {}", if control_mode.physics_paused { "paused" } else { "resumed" });
+    }
 
-    match control_mode.mode {
-        FlightMode::FreeFlight => {
-            // --- FREE FLIGHT (FPS Cam) ---
-            let Ok(mut camera_transform) = camera_query.single_mut() else { return };
+    // --- AIRCRAFT PHYSICS (Always runs unless paused) ---
+    if !control_mode.physics_paused {
+        if let Ok((mut plane_transform, mut aircraft)) = aircraft_query.single_mut() {
+        // 1. ENGINE & DRAG
+        if keyboard.pressed(KeyCode::Equal) {
+            aircraft.throttle = (aircraft.throttle + 0.5 * dt).min(1.0);
+        }
+        if keyboard.pressed(KeyCode::Minus) {
+            aircraft.throttle = (aircraft.throttle - 0.5 * dt).max(0.0);
+        }
+
+        // A. Engine Acceleration
+        let target_speed = aircraft.throttle * aircraft.max_speed;
+        let engine_acceleration = (target_speed - aircraft.speed) * aircraft.drag_factor;
+        
+        // B. Climb/Dive Acceleration (Gravity)
+        let climb_angle = plane_transform.forward().y;
+        let gravity_acceleration = -climb_angle * aircraft.gravity;
+
+        // C. Induced Drag (Turning slows you down)
+        let turn_drag = aircraft.pitch_velocity.abs() * aircraft.g_force_drag;
+
+        // Apply all accelerations
+        aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag) * dt;
+        aircraft.speed = aircraft.speed.max(0.0);
+
+        // 2. AERODYNAMICS
+        let airspeed_ratio = (aircraft.speed / aircraft.max_speed).clamp(0.0, 1.0);
+        
+        let pitch_strength = aircraft.pitch_strength * airspeed_ratio;
+        let roll_strength = aircraft.roll_strength * airspeed_ratio;
+        let yaw_strength = aircraft.yaw_strength * airspeed_ratio;
+        let rotational_damping = 2.0;
+
+        // --- INPUTS (Only in Aircraft mode) ---
+        if control_mode.mode == FlightMode::Aircraft {
+            let mut is_rolling = false;
+            let mut is_pitching = false;
+
+            if keyboard.pressed(KeyCode::KeyW) { 
+                aircraft.pitch_velocity -= pitch_strength * dt;
+                is_pitching = true;
+            }
+            if keyboard.pressed(KeyCode::KeyS) { 
+                aircraft.pitch_velocity += pitch_strength * dt;
+                is_pitching = true;
+            }
             
+            if keyboard.pressed(KeyCode::KeyA) { 
+                aircraft.roll_velocity += roll_strength * dt; 
+                is_rolling = true;
+            }
+            if keyboard.pressed(KeyCode::KeyD) { 
+                aircraft.roll_velocity -= roll_strength * dt; 
+                is_rolling = true;
+            }
+            
+            if keyboard.pressed(KeyCode::KeyQ) { aircraft.yaw_velocity += yaw_strength * dt; }
+            if keyboard.pressed(KeyCode::KeyE) { aircraft.yaw_velocity -= yaw_strength * dt; }
+
+            // --- STABILITY & AUTO-CORRECTION ---
+            let bank_angle = plane_transform.right().y;
+            let pitch_angle = plane_transform.forward().y;
+            
+            aircraft.yaw_velocity += bank_angle * aircraft.bank_turn_strength * airspeed_ratio * dt;
+
+            if !is_rolling {
+                let auto_level_force = -bank_angle * aircraft.auto_level_strength * airspeed_ratio;
+                aircraft.roll_velocity += auto_level_force * dt;
+            }
+
+            if !is_pitching {
+                let auto_level_force = -pitch_angle * aircraft.auto_level_strength * airspeed_ratio;
+                aircraft.pitch_velocity += auto_level_force * dt;
+            }
+        }
+
+        // --- DAMPING & MOVEMENT (Always applies) ---
+        aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
+        aircraft.roll_velocity -= aircraft.roll_velocity * rotational_damping * dt;
+        aircraft.yaw_velocity -= aircraft.yaw_velocity * rotational_damping * dt;
+
+        // Apply Rotation
+        plane_transform.rotate_local_x(aircraft.pitch_velocity * dt);
+        plane_transform.rotate_local_z(aircraft.roll_velocity * dt);
+        plane_transform.rotate_local_y(aircraft.yaw_velocity * dt);
+
+        // Apply Lift vs Gravity (Vertical position)
+        let forward = plane_transform.forward().as_vec3();
+        let lift_threshold = 150.0;
+        let gravity_strength = 30.0;
+        let gravity_factor = (1.0 - (aircraft.speed / lift_threshold)).max(0.0);
+        
+        let mut movement = forward * aircraft.speed;
+        movement.y -= gravity_strength * gravity_factor;
+
+        plane_transform.translation += movement * dt;
+        }
+    }
+
+    // --- CAMERA CONTROLS (Only in FreeFlight mode) ---
+    if control_mode.mode == FlightMode::FreeFlight {
+        if let Ok(mut camera_transform) = camera_query.single_mut() {
             let rotation_speed = 0.7;
-            let pan_speed = if keyboard.pressed(KeyCode::ShiftLeft) { 5000.0 } else { 50.0 };
+            let pan_speed = if keyboard.pressed(KeyCode::ShiftLeft) { 1000.0 } else { 200.0 };
             
             let forward = camera_transform.forward().as_vec3();
             let right = camera_transform.right().as_vec3();
@@ -124,101 +228,6 @@ pub fn camera_controls(
 
             camera_transform.translation += pan_direction.normalize_or_zero() * pan_speed * dt;
         }
-        FlightMode::Aircraft => {
-            // --- AIRCRAFT PHYSICS MODE ---
-            let Ok((mut plane_transform, mut aircraft)) = aircraft_query.single_mut() else { return };
-
-            // 1. ENGINE & DRAG
-            if keyboard.pressed(KeyCode::Equal) {
-                aircraft.throttle = (aircraft.throttle + 0.5 * dt).min(1.0);
-            }
-            if keyboard.pressed(KeyCode::Minus) {
-                aircraft.throttle = (aircraft.throttle - 0.5 * dt).max(0.0);
-            }
-
-            // A. Engine Acceleration
-            let target_speed = aircraft.throttle * aircraft.max_speed;
-            // Move speed towards target speed (engine vs air resistance)
-            let engine_acceleration = (target_speed - aircraft.speed) * aircraft.drag_factor;
-            
-            // B. Climb/Dive Acceleration (Gravity)
-            // forward.y is 1.0 when going UP, -1.0 when going DOWN.
-            // If going UP (1.0), we want negative acceleration (Slow down).
-            // If going DOWN (-1.0), we want positive acceleration (Speed up).
-            let climb_angle = plane_transform.forward().y;
-            let gravity_acceleration = -climb_angle * aircraft.gravity;
-
-            // C. Induced Drag (Turning slows you down)
-            let turn_drag = aircraft.pitch_velocity.abs() * aircraft.g_force_drag;
-
-            // Apply all accelerations
-            aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag) * dt;
-            
-            // Safety clamp (prevent flying backwards for now)
-            aircraft.speed = aircraft.speed.max(0.0);
-
-
-            // 2. AERODYNAMICS
-            // Effectiveness of controls depends on speed
-            let airspeed_ratio = (aircraft.speed / aircraft.max_speed).clamp(0.0, 1.0);
-            
-            let pitch_strength = aircraft.pitch_strength * airspeed_ratio;
-            let roll_strength = aircraft.roll_strength * airspeed_ratio;
-            let yaw_strength = aircraft.yaw_strength * airspeed_ratio;
-            let rotational_damping = 2.0; 
-
-            // --- INPUTS ---
-            let mut is_rolling = false;
-
-            if keyboard.pressed(KeyCode::KeyW) { aircraft.pitch_velocity -= pitch_strength * dt; }
-            if keyboard.pressed(KeyCode::KeyS) { aircraft.pitch_velocity += pitch_strength * dt; }
-            
-            if keyboard.pressed(KeyCode::KeyA) { 
-                aircraft.roll_velocity += roll_strength * dt; 
-                is_rolling = true;
-            }
-            if keyboard.pressed(KeyCode::KeyD) { 
-                aircraft.roll_velocity -= roll_strength * dt; 
-                is_rolling = true;
-            }
-            
-            if keyboard.pressed(KeyCode::KeyQ) { aircraft.yaw_velocity += yaw_strength * dt; }
-            if keyboard.pressed(KeyCode::KeyE) { aircraft.yaw_velocity -= yaw_strength * dt; }
-
-            // --- STABILITY & AUTO-CORRECTION ---
-            let bank_angle = plane_transform.right().y; 
-
-            // A. Auto-Yaw (Coordinated Turn)
-            aircraft.yaw_velocity += bank_angle * aircraft.bank_turn_strength * airspeed_ratio * dt;
-
-            // B. Auto-Level (Self-Righting Stability)
-            if !is_rolling {
-                let auto_level_force = -bank_angle * aircraft.auto_level_strength * airspeed_ratio;
-                aircraft.roll_velocity += auto_level_force * dt;
-            }
-
-            // --- DAMPING & MOVEMENT ---
-            aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
-            aircraft.roll_velocity -= aircraft.roll_velocity * rotational_damping * dt;
-            aircraft.yaw_velocity -= aircraft.yaw_velocity * rotational_damping * dt;
-
-            // Apply Rotation
-            plane_transform.rotate_local_x(aircraft.pitch_velocity * dt);
-            plane_transform.rotate_local_z(aircraft.roll_velocity * dt);
-            plane_transform.rotate_local_y(aircraft.yaw_velocity * dt);
-
-            // Apply Lift vs Gravity (Vertical position)
-            let forward = plane_transform.forward().as_vec3();
-            let lift_threshold = 150.0;
-            // Gravity affecting POSITION (falling out of sky), distinct from SPEED
-            let gravity_strength = 30.0;
-            let gravity_factor = (1.0 - (aircraft.speed / lift_threshold)).max(0.0);
-            
-            let mut movement = forward * aircraft.speed;
-            movement.y -= gravity_strength * gravity_factor;
-
-            plane_transform.translation += movement * dt;
-        }
     }
 }
 
@@ -229,7 +238,7 @@ pub fn camera_follow_aircraft(
     aircraft_query: Query<(&Transform, &Aircraft), (With<Aircraft>, Without<MainCamera>)>,
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
 ) {
-    if control_mode.mode != FlightMode::Aircraft {
+    if control_mode.mode != FlightMode::Aircraft || control_mode.physics_paused {
         return;
     }
 

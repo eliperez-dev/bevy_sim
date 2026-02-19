@@ -8,6 +8,7 @@ use bevy::{
     dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
     camera::ClearColorConfig,
     window::{PresentMode, WindowPlugin},
+    diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore},
 };
 
 
@@ -48,32 +49,6 @@ fn main() {
                 }),
             // You need to add this plugin to enable wireframe rendering
             WireframePlugin::default(),
-            FpsOverlayPlugin {
-                config: FpsOverlayConfig {
-                    text_config: TextFont {
-                        // Here we define size of our overlay
-                        font_size: 42.0,
-                        // If we want, we can use a custom font
-                        font: default(),
-                        // We could also disable font smoothing,
-                        font_smoothing: bevy::text::FontSmoothing::default(),
-
-                        ..default()
-                    },
-                    // We can also change color of the overlay
-                    text_color: Color::srgb(0.0, 1.0, 0.0),
-                    // We can also set the refresh interval for the FPS counter
-                    refresh_interval: core::time::Duration::from_millis(500),
-                    enabled: true,
-                    frame_time_graph_config: FrameTimeGraphConfig {
-                        enabled: true,
-                        // The minimum acceptable fps
-                        min_fps: 20.0,
-                        // The target fps
-                        target_fps: 60.0,
-                    },
-                },
-            },
         ))
         // Wireframes can be configured with this resource. This can be changed at runtime.
         .insert_resource(WireframeConfig {
@@ -109,6 +84,7 @@ fn main() {
         })
         .init_resource::<ControlMode>()
         .add_plugins(EguiPlugin::default())
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_systems(Startup, setup_camera_system)
         .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
         .add_systems(Startup, (setup, setup_camera_fog, spawn_stars).chain())
@@ -278,7 +254,19 @@ fn update_debugger(
     cycle: Res<DayNightCycle>,
     control_mode: Res<ControlMode>,
     mut debugger: Query<&mut Text, With<Debugger>>,
+    diagnostics: Res<DiagnosticsStore>,
+    time: Res<Time>,
+    mut last_update: Local<f32>,
+    mut cached_fps: Local<f32>,
 ) {
+    if time.elapsed_secs() - *last_update >= 0.5 {
+        *last_update = time.elapsed_secs();
+        *cached_fps = diagnostics
+            .get(&FrameTimeDiagnosticsPlugin::FPS)
+            .and_then(|fps| fps.smoothed())
+            .unwrap_or(0.0) as f32;
+    }
+
     let Ok(camera_transform) = camera.single() else { return };
     let cam_trans = camera_transform.translation;
     let camera_pos_arr = [cam_trans.x, cam_trans.y, cam_trans.z];
@@ -286,22 +274,12 @@ fn update_debugger(
     let biome = world.get_biome(&camera_pos_arr);
     let climate = world.get_climate(&camera_pos_arr);
 
-    // Access the String inside the Text section
-    // (Adjust .sections[0].value if using standard Text, or .0 if using a tuple struct wrapper)
     let Ok(mut text_component) = debugger.single_mut() else { return };
-    let message = &mut text_component.0; 
-    // ^ NOTE: If your Debugger struct is `struct Debugger(pub String)`, use .0. 
-    // If it is a Component on a Text bundle, use .sections[0].value.
-    // Based on your snippet `unwrap().0`, I will assume you have a wrapper component, 
-    // but usually Text is modified via sections. I will use your snippet's style:
-    // let message = &mut debugger.single_mut().unwrap().0; 
-    
-    // However, standard Bevy Text modification looks like this:
-    // let message = &mut debugger.single_mut().sections[0].value;
+    let message = &mut text_component.0;
 
     message.clear();
 
-    // --- GENERAL STATS ---
+    message.push_str(&format!("FPS: {:.0}\n", *cached_fps));
     message.push_str(&format!("Mode: {:?} (Press F to toggle)\n", control_mode.mode));
     message.push_str(&format!("Position: [{:.0}, {:.0}, {:.0}]\n", cam_trans.x, cam_trans.y, cam_trans.z));
     message.push_str(&format!("Biome: {:?} | Climate: {:?}\n", biome, climate));
@@ -351,12 +329,6 @@ pub fn debugger_ui(
         // --- AIRCRAFT SETTINGS ---
         ui.heading("Aircraft Physics");
         if let Ok(mut aircraft) = aircraft_query.single_mut() {
-            ui.horizontal(|ui| {
-                ui.label(format!("Speed: {:.0}", aircraft.speed));
-                ui.add(egui::ProgressBar::new(aircraft.speed / 400.0)); // 400 is arbitrary view scale
-            });
-            ui.label(format!("Throttle: {:.0}%", aircraft.throttle * 100.0));
-
             ui.collapsing("Flight Model Tuning", |ui| {
                 ui.label("Forces");
                 ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed (Level)"));
@@ -388,6 +360,7 @@ pub fn debugger_ui(
 
         ui.separator();
 
+        ui.collapsing("Render Settings", |ui| {
         ui.heading("Render Settings");
         ui.checkbox(&mut wireframe_config.global, "Global Wireframe");
 
@@ -422,7 +395,8 @@ pub fn debugger_ui(
                 ui.add(egui::Slider::new(density, 0.000005..=0.001).text("Fog Density").logarithmic(true));
             }
         }
-
+        });
+        
         if ui.button("Reset Simulation").clicked() {
             day_cycle.time_of_day = 0.5;
             if let Ok(mut aircraft) = aircraft_query.single_mut() {

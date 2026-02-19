@@ -60,7 +60,7 @@ pub fn flight_hud_system(
                 ui.label(egui::RichText::new("ALTITUDE").size(12.0));
                 draw_altitude_tape(ui, altitude);
                 ui.horizontal(|ui| {
-                    ui.label(format!("{} meters", altitude.round()));
+                    ui.label(format!("{}", altitude));
                 });
             });
         });
@@ -77,7 +77,7 @@ pub fn flight_hud_system(
                 ui.label(egui::RichText::new("THROTTLE").size(12.0));
                 draw_throttle_gauge(ui, aircraft.throttle);
                 ui.horizontal(|ui| {
-                    ui.label(format!("{}", aircraft.throttle));
+                    ui.label(format!("0{:?}", aircraft.throttle));
                 });
             });
         });
@@ -110,7 +110,7 @@ pub fn flight_hud_system(
                 ui.label(egui::RichText::new("AIRSPEED").size(12.0));
                 draw_airspeed_tape(ui, speed, aircraft);
                 ui.horizontal(|ui| {
-                    ui.label(format!(" {} m/s", aircraft.speed.round()));
+                    ui.label(format!("{}", aircraft.speed));
                 });
             });
         });
