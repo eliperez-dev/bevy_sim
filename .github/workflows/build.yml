@@ -2,7 +2,7 @@ name: Build Release
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   workflow_dispatch: # This adds a button to let you trigger it manually
 
 jobs:

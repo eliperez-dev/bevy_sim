@@ -46,7 +46,7 @@ pub fn update_daylight_cycle(
         transform.rotation = final_rotation; 
         
         let sunset_horizon_factor = (1.0 - (up_dot.abs() / 0.34)).clamp(0.0, 1.0);
-        let star_horizon_factor = (1.0 - (up_dot.abs() / 0.24)).clamp(0.0, 1.0);
+        //let star_horizon_factor = (1.0 - (up_dot.abs() / 0.24)).clamp(0.0, 1.0);
         light.illuminance = daylight * MAX_ILLUMANENCE;
 
         if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
