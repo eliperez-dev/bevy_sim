@@ -25,3 +25,7 @@ opt-level = 3
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+
+# Enable a large amount of optimization in the release profile for dependencies.
+[profile.release.package."*"]
+opt-level = 3
