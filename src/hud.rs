@@ -92,9 +92,9 @@ pub fn flight_hud_system(
             ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
             ui.vertical_centered(|ui| {
                 ui.label("HEADING");
-                ui.label(egui::RichText::new(format!("{:.0}°", heading))
-                    .size(18.0));
                 draw_compass_rose(ui, heading);
+                ui.label(egui::RichText::new(format!("{:.0}°", heading))
+                    .size(12.0));
             });
         });
     
@@ -117,9 +117,11 @@ pub fn flight_hud_system(
 }
 
 fn calculate_heading(forward: Vec3) -> f32 {
-    let angle = f32::atan2(forward.x, forward.z).to_degrees() - 90.0;
+    let angle = f32::atan2(forward.x, -forward.z).to_degrees() + 90.0;
     if angle < 0.0 {
         360.0 + angle
+    } else if angle >= 360.0 {
+        angle - 360.0
     } else {
         angle
     }
@@ -137,7 +139,7 @@ fn calculate_roll(transform: &Transform) -> f32 {
 
 fn draw_compass_rose(ui: &mut egui::Ui, heading: f32) {
     let (response, painter) = ui.allocate_painter(
-        egui::Vec2::new(100.0, 20.0),
+        egui::Vec2::new(60.0, 20.0),
         egui::Sense::hover(),
     );
     
@@ -179,7 +181,7 @@ fn draw_compass_rose(ui: &mut egui::Ui, heading: f32) {
                 egui::Pos2::new(x_pos, center_y),
                 egui::Align2::CENTER_CENTER,
                 directions[i],
-                egui::FontId::proportional(14.0),
+                egui::FontId::proportional(22.0),
                 color,
             );
         }

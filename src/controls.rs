@@ -47,7 +47,7 @@ impl Default for Aircraft {
             roll_strength: 3.0,
             yaw_strength: 1.0,
             bank_turn_strength: 0.85,
-            auto_level_strength: 0.45,
+            auto_level_strength: 0.60,
         }
     }
 }
@@ -172,8 +172,18 @@ pub fn camera_controls(
 
             if !is_pitching {
                 let auto_level_force = -pitch_angle * aircraft.auto_level_strength * airspeed_ratio;
-                aircraft.pitch_velocity += auto_level_force * dt;
+                aircraft.pitch_velocity += auto_level_force / 1.25 * dt;
             }
+        }
+
+        // --- STALL BEHAVIOR (Always applies) ---
+        let stall_strength = (1.0 - airspeed_ratio).max(0.0);
+        let stall_pitch_down = stall_strength * match plane_transform.up().y.is_sign_negative() {
+            true => -1.0,
+            false => 1.0,
+        };
+        if aircraft.speed < aircraft.max_speed * 0.33 {
+            aircraft.pitch_velocity -= stall_pitch_down * dt;
         }
 
         // --- DAMPING & MOVEMENT (Always applies) ---
@@ -252,7 +262,7 @@ pub fn camera_follow_aircraft(
     let max_extra_dist = 4.0;
     let speed_threshold = 100.0;
     let height = 8.0;
-    let look_ahead_distance = 50.0;
+    let look_ahead_distance = 0.2 * aircraft.speed;
     
     let speed_ratio = (aircraft.speed / speed_threshold).clamp(0.0, 2.0);
     let dynamic_distance = base_distance + (max_extra_dist * speed_ratio.powf(0.5));
