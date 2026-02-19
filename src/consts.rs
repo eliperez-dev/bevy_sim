@@ -8,7 +8,7 @@ pub const MAP_HEIGHT_SCALE: f32 = 230.0;
 
 pub const MAX_ILLUMANENCE: f32 = 5_300.0;
 
-pub const SPAWN_HEIGHT: f32 = 1300.0;
+pub const SPAWN_HEIGHT: f32 = 2000.0;
 
 pub struct TerrainStop {
     pub height: f32,

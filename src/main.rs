@@ -83,6 +83,7 @@ fn main() {
             inclination: -1.0,     
         })
         .init_resource::<ControlMode>()
+        .init_resource::<Wind>()
         .add_plugins(EguiPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_systems(Startup, setup_camera_system)
@@ -321,6 +322,7 @@ pub fn debugger_ui(
     mut fog_query: Query<&mut DistanceFog, With<MainCamera>>,
     mut render_settings: ResMut<RenderSettings>,
     mut aircraft_query: Query<&mut Aircraft, Without<MainCamera>>,
+    mut wind: ResMut<Wind>,
 ) -> Result<(), > { 
     
     egui::Window::new("Debugger").show(contexts.ctx_mut()?, |ui| {
@@ -329,6 +331,26 @@ pub fn debugger_ui(
         // --- AIRCRAFT SETTINGS ---
         ui.heading("Aircraft Physics");
         if let Ok(mut aircraft) = aircraft_query.single_mut() {
+            ui.collapsing("Current Values", |ui| {
+                let airspeed_ratio = aircraft.speed / aircraft.max_speed;
+                let control_effectiveness = if airspeed_ratio > 1.0 {
+                    (1.0 / airspeed_ratio).clamp(0.3, 1.0)
+                } else {
+                    airspeed_ratio.clamp(0.0, 1.0)
+                };
+                let centripetal_accel = aircraft.speed * aircraft.pitch_velocity.abs();
+                let g_force = centripetal_accel / 9.8;
+                let turn_drag = g_force * aircraft.g_force_drag;
+                let speed_drag = (airspeed_ratio).powi(2) * 20.0;
+                
+                ui.label(format!("Speed: {:.1} ({:.0}%)", aircraft.speed, airspeed_ratio * 100.0));
+                ui.label(format!("Control Effectiveness: {:.0}%", control_effectiveness * 100.0));
+                ui.label(format!("Pitch Velocity: {:.3}", aircraft.pitch_velocity));
+                ui.label(format!("G-Force: {:.2}G", g_force));
+                ui.label(format!("Turn Drag: {:.2}", turn_drag));
+                ui.label(format!("Speed Drag: {:.2}", speed_drag));
+            });
+            
             ui.collapsing("Flight Model Tuning", |ui| {
                 ui.label("Forces");
                 ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed (Level)"));
@@ -350,6 +372,39 @@ pub fn debugger_ui(
         } else {
             ui.label("No Aircraft found.");
         }
+        ui.separator();
+
+        // --- WIND SETTINGS ---
+        ui.heading("Wind & Turbulence");
+        ui.collapsing("Wind Settings", |ui| {
+            let mut wind_speed = wind.base_wind.length();
+            let wind_direction = if wind_speed > 0.01 {
+                wind.base_wind / wind_speed
+            } else {
+                Vec3::new(1.0, 0.0, 0.0)
+            };
+            
+            ui.label("Wind Speed");
+            if ui.add(egui::Slider::new(&mut wind_speed, 0.0..=100.0).text("Speed")).changed() {
+                wind.base_wind = wind_direction * wind_speed;
+            }
+            
+            ui.separator();
+            ui.label("Wind Direction (Vector)");
+            ui.horizontal(|ui| {
+                ui.label("X:");
+                ui.add(egui::DragValue::new(&mut wind.base_wind.x).speed(0.5));
+                ui.label("Y:");
+                ui.add(egui::DragValue::new(&mut wind.base_wind.y).speed(0.5));
+                ui.label("Z:");
+                ui.add(egui::DragValue::new(&mut wind.base_wind.z).speed(0.5));
+            });
+            
+            ui.separator();
+            ui.label("Turbulence");
+            ui.add(egui::Slider::new(&mut wind.turbulence_intensity, 0.0..=3.0).text("Intensity").logarithmic(true));
+            ui.add(egui::Slider::new(&mut wind.turbulence_frequency, 0.01..=10.0).text("Frequency"));
+        });
         ui.separator();
 
         // --- WORLD GEN SETTINGS ---

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui::{self, Frame}};
-use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera};
+use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera, Wind};
 
 pub fn flight_hud_system(
     mut contexts: EguiContexts,
@@ -465,7 +465,11 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
             let angle1 = start_angle - angle_range * t1;
             let angle2 = start_angle - angle_range * t2;
             
-            let color = egui::Color32::from_rgb(40, 40, 40);
+            let color = if t1 > (1.0 / 1.3) {
+                egui::Color32::from_rgb(60, 20, 20)
+            } else {
+                egui::Color32::from_rgb(40, 40, 40)
+            };
             
             let inner_radius = radius - 8.0;
             let p1_outer = egui::Pos2::new(
@@ -492,15 +496,21 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
             ));
         }
         
-        let num_ticks = 10;
+        let num_ticks = 13;
         for i in 0..=num_ticks {
             let t = i as f32 / num_ticks as f32;
             let angle = start_angle - angle_range * t;
-            let throttle_percent = t * 100.0;
+            let throttle_percent = t * 130.0;
             
             let is_major = i % 2 == 0;
             let tick_start = if is_major { radius - 12.0 } else { radius - 8.0 };
             let tick_end = radius;
+            
+            let tick_color = if throttle_percent > 100.0 {
+                egui::Color32::from_rgb(255, 100, 100)
+            } else {
+                egui::Color32::WHITE
+            };
             
             let p1 = egui::Pos2::new(
                 center.x + tick_start * angle.cos(),
@@ -513,7 +523,7 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
             
             painter.line_segment(
                 [p1, p2],
-                egui::Stroke::new(1.5, egui::Color32::WHITE),
+                egui::Stroke::new(1.5, tick_color),
             );
             
             if is_major {
@@ -528,12 +538,38 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
                     egui::Align2::CENTER_CENTER,
                     format!("{:.0}", throttle_percent),
                     egui::FontId::proportional(10.0),
-                    egui::Color32::WHITE,
+                    tick_color,
                 );
             }
         }
         
-        let throttle_angle = start_angle - angle_range * throttle;
+        let redline_t = 1.0 / 1.3;
+        let redline_angle = start_angle - angle_range * redline_t;
+        let redline_start = radius - 15.0;
+        let redline_end = radius + 3.0;
+        
+        let p1 = egui::Pos2::new(
+            center.x + redline_start * redline_angle.cos(),
+            center.y - redline_start * redline_angle.sin(),
+        );
+        let p2 = egui::Pos2::new(
+            center.x + redline_end * redline_angle.cos(),
+            center.y - redline_end * redline_angle.sin(),
+        );
+        
+        painter.line_segment(
+            [p1, p2],
+            egui::Stroke::new(3.0, egui::Color32::from_rgb(255, 0, 0)),
+        );
+        
+        let throttle_clamped = throttle.min(1.3);
+        let throttle_angle = start_angle - angle_range * (throttle_clamped / 1.3);
+        
+        let needle_color = if throttle > 1.0 {
+            egui::Color32::from_rgb(255, 100, 100)
+        } else {
+            egui::Color32::from_rgb(100, 255, 100)
+        };
         
         let needle_length = radius - 15.0;
         let needle_tip = egui::Pos2::new(
@@ -543,10 +579,10 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32) {
         
         painter.line_segment(
             [center, needle_tip],
-            egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 255, 100)),
+            egui::Stroke::new(3.0, needle_color),
         );
         
-        painter.circle_filled(center, 5.0, egui::Color32::from_rgb(100, 255, 100));
+        painter.circle_filled(center, 5.0, needle_color);
         
         painter.text(
             egui::Pos2::new(center.x, center.y - 25.0),
