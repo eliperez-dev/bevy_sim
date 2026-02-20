@@ -5,7 +5,6 @@ use bevy::{
     platform::collections::HashSet,
     prelude::*, 
     render::{RenderPlugin, settings::{WgpuFeatures, WgpuSettings}},
-    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
     camera::ClearColorConfig,
     window::{PresentMode, WindowPlugin},
     diagnostic::{FrameTimeDiagnosticsPlugin, DiagnosticsStore},

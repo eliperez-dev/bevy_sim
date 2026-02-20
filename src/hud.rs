@@ -1,13 +1,12 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui::{self, Frame}};
-use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera, Wind};
+use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera};
 
 pub fn flight_hud_system(
     mut contexts: EguiContexts,
     control_mode: Res<ControlMode>,
     aircraft_query: Query<(&Transform, &Aircraft), (With<Aircraft>, Without<MainCamera>)>,
     camera_query: Query<&Transform, With<MainCamera>>,
-    time: Res<Time>,
 ) {
     if control_mode.mode != FlightMode::Aircraft {
         return;
