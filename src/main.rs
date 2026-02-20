@@ -61,14 +61,13 @@ fn main() {
             lod_to_update: Vec::new(),
             render_distance: 40,
             lod_levels: [
-                (0.3 , 12),
-                (0.5 , 8),
-                (1.0 , 5),
-                (2.0, 3),
-                (2.5, 1),
-                
+                (0.70 , 25),
+                (1.25 , 15),
+                (2.0, 8),
+                (3.0, 3),
+                (4.0, 1),
             ],
-            lod_quality_multiplier: 2,
+            lod_quality_multiplier: 1,
             lod_distance_multiplier: 10.0,
         })
         .insert_resource(RenderSettings {
@@ -487,7 +486,7 @@ pub fn debugger_ui(
             if ui.add(egui::Slider::new(&mut chunk_manager.lod_quality_multiplier, 1..=4).text("LOD Quality")).changed() {
                 render_settings.just_updated = true;
             }
-            if ui.add(egui::Slider::new(&mut chunk_manager.lod_distance_multiplier, 1.0..=15.0).text("LOD Distance")).changed() {
+            if ui.add(egui::Slider::new(&mut chunk_manager.lod_distance_multiplier, 1.0..=25.0).text("LOD Distance")).changed() {
                 render_settings.just_updated = true;
             }
 

@@ -378,7 +378,7 @@ pub struct WorldGenerationSettings {
 impl Default for WorldGenerationSettings {
     fn default() -> Self {
         Self {
-            max_chunks_per_frame: 50,
+            max_chunks_per_frame: 100,
         }
     }
 }

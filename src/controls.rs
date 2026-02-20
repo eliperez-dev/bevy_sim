@@ -131,16 +131,15 @@ impl Default for Wind {
             // We normalize this so it strictly represents a direction/heading
             wind_direction: Vec3::new(2.0, 0.0, 1.0).normalize(), 
             
-            // 11.18 is roughly the speed (length) of your old Vec3(10.0, 0.0, 5.0)
-            wind_speed: 11.18, 
+            wind_speed: 0.0, 
             
-            wind_evolution_speed: 0.05,
-            min_wind_speed: 5.0,
-            max_wind_speed: 35.0,
+            wind_evolution_speed: 0.02,
+            min_wind_speed: 0.0,
+            max_wind_speed: 10.0,
             
             macro_wind_freq: 0.001,
             weather_evolution_rate: 0.85,
-            max_angle_shift: std::f32::consts::FRAC_PI_2,
+            max_angle_shift: std::f32::consts::FRAC_PI_4,
             
             turbulence_intensity: 0.008,
             turbulence_frequency: 6.0,
@@ -280,22 +279,28 @@ pub fn camera_controls(
             // We can also skip .length() and just use current_speed directly
             let wind_acceleration = wind_dot * current_speed * 0.3;
             
-            // D2. Macro Wind Rotational Effects (similar to turbulence)
+            // D2. Macro Wind Rotational Effects
             let right = plane_transform.right().as_vec3();
             let up = plane_transform.up().as_vec3();
             
             // Project wind onto aircraft's local axes
+            // These projections are already proportional to the angle:
+            // - 90° crosswind: maximum lateral component
+            // - 0° or 180° (head/tail): zero lateral component
             let wind_lateral = current_wind.dot(right);
             let wind_vertical = current_wind.dot(up);
-            let wind_forward = current_wind.dot(forward);
             
-            // Cross-wind causes roll and yaw
-            let macro_wind_coupling = 0.003 * (current_speed / 20.0).min(2.0);
+            // Scale effect by dynamic pressure (wind hitting faster = more force)
+            let wind_force_scale = (current_speed / 20.0).min(2.0);
+            let macro_wind_coupling = 0.003 * wind_force_scale;
+            
+            // Crosswind causes roll (banking into the wind) and yaw (weathervaning)
+            // Note: wind_lateral is already zero when wind is from ahead/behind
             let macro_wind_roll = -wind_lateral * macro_wind_coupling * 2.0;
             let macro_wind_yaw = wind_lateral * macro_wind_coupling * 0.2;
             
-            // Vertical wind causes pitch
-            let macro_wind_pitch = wind_vertical * macro_wind_coupling * 0.8;
+            // Vertical wind (updrafts/downdrafts) causes pitch rotation
+            let macro_wind_pitch = wind_vertical * macro_wind_coupling * 0.4;
 
             // E. Parasitic drag
             let high_speed_multiplier = 1.0 + (airspeed_ratio.max(1.0) - 1.0) * 0.5;
@@ -385,9 +390,9 @@ pub fn camera_controls(
             
             // Couple translational turbulence to rotational effects
             let coupling_strength = 0.7;
-            let turbulence_pitch = turbulence_velocity_y * coupling_strength;
-            let turbulence_roll = -turbulence_velocity_x * coupling_strength * 1.25;
-            let turbulence_yaw = turbulence_velocity_x * coupling_strength / 1.5;
+            let turbulence_pitch = turbulence_velocity_y * coupling_strength * 0.5;
+            let turbulence_roll = -turbulence_velocity_x * coupling_strength * 2.0;
+            let turbulence_yaw = turbulence_velocity_x * coupling_strength * 0.75;
             
             let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(turbulance_pow);
             aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
