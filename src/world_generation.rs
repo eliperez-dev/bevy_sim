@@ -347,7 +347,7 @@ pub struct ChunkManager {
     pub to_spawn: Vec<(i32, i32)>,
     pub lod_to_update: Vec<Entity>,
     pub render_distance: i32,
-    pub lod_levels: [(f32, u32); 3],
+    pub lod_levels: [(f32, u32); 5],
     pub lod_quality_multiplier: u32,
     pub lod_distance_multiplier: f32,
 }

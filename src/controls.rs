@@ -4,8 +4,40 @@ use bevy::{
 };
 use noise::{NoiseFn, Perlin};
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FlightMode {
+    Aircraft,
+    Orbit,
+    FreeFlight,
+}
+
+impl Default for ControlMode {
+    fn default() -> Self {
+        Self {
+            mode: FlightMode::Aircraft, 
+            physics_paused: false,
+        }
+    }
+}
+
 #[derive(Component)]
-pub struct MainCamera;
+pub struct MainCamera {
+    pub orbit_yaw: f32,
+    pub orbit_pitch: f32,
+    pub orbit_distance: f32, 
+}
+
+// Manually implement default to establish our starting values
+impl Default for MainCamera {
+    fn default() -> Self {
+        Self {
+            orbit_yaw: 0.0,
+            orbit_pitch: 0.0,
+            orbit_distance: 18.0, // Replaces your hardcoded `base_distance = 18.0`
+        }
+    }
+}
+
 
 #[derive(Component)]
 pub struct Aircraft {
@@ -46,7 +78,7 @@ impl Default for Aircraft {
             yaw_velocity: 0.0,
 
             // Default Physics Values
-            max_speed: 350.0,
+            max_speed: 450.0,
             max_throttle: 1.5,
             thrust: 1.5,
             gravity: 80.0,       
@@ -69,20 +101,6 @@ pub struct ControlMode {
     pub physics_paused: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum FlightMode {
-    FreeFlight,
-    Aircraft,
-}
-
-impl Default for ControlMode {
-    fn default() -> Self {
-        Self {
-            mode: FlightMode::Aircraft,
-            physics_paused: false,
-        }
-    }
-}
 
 #[derive(Resource)]
 pub struct Wind {
@@ -146,8 +164,9 @@ pub fn camera_controls(
     // --- Toggles ---
     if keyboard.just_pressed(KeyCode::KeyF) {
         control_mode.mode = match control_mode.mode {
+            FlightMode::Aircraft => FlightMode::Orbit,
+            FlightMode::Orbit => FlightMode::FreeFlight,
             FlightMode::FreeFlight => FlightMode::Aircraft,
-            FlightMode::Aircraft => FlightMode::FreeFlight,
         };
         info!("Switched to {:?}", control_mode.mode);
     }
@@ -258,7 +277,8 @@ pub fn camera_controls(
             let rotational_damping = 2.0;
 
             // --- INPUTS (Only in Aircraft mode) ---
-            if control_mode.mode == FlightMode::Aircraft {
+            if control_mode.mode == FlightMode::Aircraft
+            || control_mode.mode == FlightMode::Orbit {
                 let mut is_rolling = false;
                 let mut is_pitching = false;
 
@@ -397,48 +417,93 @@ pub fn camera_controls(
 
 pub fn camera_follow_aircraft(
     time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     control_mode: Res<ControlMode>,
     aircraft_query: Query<(&Transform, &Aircraft), (With<Aircraft>, Without<MainCamera>)>,
-    mut camera_query: Query<&mut Transform, With<MainCamera>>,
+    mut camera_query: Query<(&mut Transform, &mut MainCamera)>,
 ) {
-    if control_mode.mode != FlightMode::Aircraft || control_mode.physics_paused {
+    // Abort if we are in FreeFlight or paused
+    if control_mode.mode == FlightMode::FreeFlight || control_mode.physics_paused {
         return;
     }
 
     let Ok((plane_transform, aircraft)) = aircraft_query.single() else { return; };
-    let Ok(mut camera_transform) = camera_query.single_mut() else { return; };
+    let Ok((mut camera_transform, mut main_camera)) = camera_query.single_mut() else { return; };
 
-    // Determine actual travel direction. Fall back to forward vector if stopped.
+    // --- CAMERA ZOOM CONTROLS (Only in Orbit Mode) ---
+    if control_mode.mode == FlightMode::Orbit 
+    || control_mode.mode == FlightMode::Aircraft {
+        let zoom_speed = 25.0; // Adjust for faster/slower zooming
+        
+        if keyboard.pressed(KeyCode::KeyX) { main_camera.orbit_distance -= zoom_speed * time.delta_secs(); }
+        if keyboard.pressed(KeyCode::KeyZ) { main_camera.orbit_distance += zoom_speed * time.delta_secs(); }
+        
+        // Clamp it so you can't clip through the plane or zoom into the stratosphere
+        main_camera.orbit_distance = main_camera.orbit_distance.clamp(5.0, 150.0);
+    }
+
+    // --- BASE CAMERA MATH ---
     let mut actual_direction = aircraft.velocity.normalize_or_zero();
     if actual_direction == Vec3::ZERO {
         actual_direction = plane_transform.forward().into();
     }
 
-    // Move camera with the exact velocity rather than purely forward speed
     let plane_movement = aircraft.velocity * time.delta_secs();
     camera_transform.translation += plane_movement;
 
-    let base_distance = 18.0;
     let max_extra_dist = 4.0;
     let speed_threshold = 100.0;
-    let height = 8.0;
-    let look_ahead_distance = 0.2 * aircraft.speed;
+    let height = 7.0;
     
     let speed_ratio = (aircraft.speed / speed_threshold).clamp(0.0, 2.0);
-    let dynamic_distance = base_distance + (max_extra_dist * speed_ratio.powf(0.5));
+    
+    // We replace 'base_distance' with our new controllable variable!
+    let dynamic_distance = main_camera.orbit_distance + (max_extra_dist * speed_ratio.powf(0.5));
 
     let smoothness = 2.0 + (speed_ratio * 1.5);
     let t = (time.delta_secs() * smoothness).min(1.0);
 
-    // Position behind the *movement* direction, not the local back
-    let target_position = plane_transform.translation 
-        + (-actual_direction * dynamic_distance) 
-        + (plane_transform.up() * height);
-    
-    camera_transform.translation = camera_transform.translation.lerp(target_position, t);
+    // --- APPLY BEHAVIOR BASED ON FLIGHT MODE ---
+    match control_mode.mode {
+        FlightMode::Orbit => {
+            let orbit_speed = 2.0;
 
-    // Look along the *movement* direction
-    let look_target = plane_transform.translation + (actual_direction * look_ahead_distance);
-    let target_rotation = camera_transform.looking_at(look_target, plane_transform.up()).rotation;
-    camera_transform.rotation = camera_transform.rotation.slerp(target_rotation, t);
+            if keyboard.pressed(KeyCode::ArrowLeft) { main_camera.orbit_yaw -= orbit_speed * time.delta_secs(); }
+            if keyboard.pressed(KeyCode::ArrowRight) { main_camera.orbit_yaw += orbit_speed * time.delta_secs(); }
+            if keyboard.pressed(KeyCode::ArrowUp) { main_camera.orbit_pitch -= orbit_speed * time.delta_secs(); }
+            if keyboard.pressed(KeyCode::ArrowDown) { main_camera.orbit_pitch += orbit_speed * time.delta_secs(); }
+
+            // Clamp to prevent flipping upside down
+            main_camera.orbit_pitch = main_camera.orbit_pitch.clamp(-0.4, 1.2);
+
+            // Calculate Orbit Position
+            let orbit_rotation = Quat::from_axis_angle(plane_transform.up().into(), main_camera.orbit_yaw) 
+                               * Quat::from_axis_angle(plane_transform.right().into(), main_camera.orbit_pitch);
+
+            let base_offset = (-actual_direction * dynamic_distance) + (plane_transform.up() * height);
+            let rotated_offset = orbit_rotation * base_offset;
+
+            let target_position = plane_transform.translation + rotated_offset;
+            camera_transform.translation = camera_transform.translation.lerp(target_position, t);
+
+            // Look directly at the plane
+            let target_rotation = camera_transform.looking_at(plane_transform.translation, plane_transform.up()).rotation;
+            camera_transform.rotation = target_rotation;
+        }
+        FlightMode::Aircraft => {
+            // Standard Chase Position
+            let target_position = plane_transform.translation 
+                + (-actual_direction * dynamic_distance) 
+                + (plane_transform.up() * height);
+            camera_transform.translation = camera_transform.translation.lerp(target_position, t);
+
+            // Look Ahead of the plane
+            let look_ahead_distance = 0.2 * aircraft.speed;
+            let look_target = plane_transform.translation + (actual_direction * look_ahead_distance);
+            
+            let target_rotation = camera_transform.looking_at(look_target, plane_transform.up()).rotation;
+            camera_transform.rotation = camera_transform.rotation.slerp(target_rotation, t);
+        }
+        FlightMode::FreeFlight => unreachable!(), // Handled by early return
+    }
 }

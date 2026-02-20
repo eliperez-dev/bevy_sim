@@ -62,9 +62,12 @@ fn main() {
             lod_to_update: Vec::new(),
             render_distance: 40,
             lod_levels: [
-                (1.0 , 4),
-                (2.0, 2),
-                (3.0, 1),
+                (0.3 , 12),
+                (0.5 , 8),
+                (1.0 , 5),
+                (2.0, 3),
+                (2.5, 1),
+                
             ],
             lod_quality_multiplier: 2,
             lod_distance_multiplier: 10.0,
@@ -220,7 +223,7 @@ fn setup_camera_fog(mut commands: Commands) {
             far: 50000.0,
             ..default()
         }),
-        MainCamera,
+        MainCamera::default(),
         Transform::from_xyz(0.0, 4000.0, 0.0).looking_at(Vec3::new(5000.0, 3000.0, 5000.0), Vec3::Y),
         DistanceFog {
             // The base "thick" color of the fog
@@ -294,17 +297,25 @@ fn update_debugger(
     match control_mode.mode {
         FlightMode::FreeFlight => {
             message.push_str("WASD: Move Horizontal\n");
-            message.push_str("Q / E: Up / Down\n");
-            message.push_str("Shift: Turbo Speed\n");
-            message.push_str("Arrows: Look Around\n");
+            message.push_str("E / Q: Move Up / Down\n");
+            message.push_str("Shift: Fast Move Speed\n");
+            message.push_str("Arrows: Look Around (Pitch/Yaw)\n");
             message.push_str("Z / X: Roll Camera\n");
+        },
+        FlightMode::Orbit => {
+            message.push_str("W / S: Pitch Down/Up\n");
+            message.push_str("A / D: Roll (Turn)\n");
+            message.push_str("Q / E: Yaw (Rudder)\n");
+            message.push_str("= / -: Throttle Up/Down\n"); // Using = since Bevy uses KeyCode::Equal
+            message.push_str("Arrows: Orbit Camera\n");
+            message.push_str("Z / X: Zoom Camera In/Out\n");
         },
         FlightMode::Aircraft => {
             message.push_str("W / S: Pitch Down/Up\n");
             message.push_str("A / D: Roll (Turn)\n");
             message.push_str("Q / E: Yaw (Rudder)\n");
-            message.push_str("+ / -: Throttle\n");
-            message.push_str("(Physics Enabled: Stalls & Gravity)\n");
+            message.push_str("= / -: Throttle Up/Down\n");
+            message.push_str("(Camera Auto-Chases)\n");
         }
     }
 }
