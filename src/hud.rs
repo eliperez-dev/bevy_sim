@@ -1,12 +1,13 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui::{self, Frame}};
-use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera};
+use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera, Wind};
 
 pub fn flight_hud_system(
     mut contexts: EguiContexts,
     control_mode: Res<ControlMode>,
     aircraft_query: Query<(&Transform, &Aircraft), (With<Aircraft>, Without<MainCamera>)>,
     camera_query: Query<&Transform, With<MainCamera>>,
+    wind: Res<Wind>,
 ) {
     if control_mode.mode != FlightMode::Aircraft {
         return;
@@ -82,15 +83,20 @@ pub fn flight_hud_system(
         .title_bar(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_TOP, [0.0, 20.0])
-        .fixed_size([120.0, 100.0])
+        .fixed_size([150.0, 150.0])
         .frame(window_frame)
         .show(ctx, |ui| {
             ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
             ui.vertical_centered(|ui| {
-                ui.label("HEADING");
-                draw_compass_rose(ui, heading);
-                ui.label(egui::RichText::new(format!("{:.0}°", heading))
-                    .size(12.0));
+                ui.label("HEADING & WIND");
+                
+                let wind_heading = calculate_wind_heading(&wind);
+                draw_wind_compass(ui, heading, wind_heading, wind.wind_speed);
+                
+                ui.label(egui::RichText::new(format!("HDG: {:.0}°", heading))
+                    .size(11.0));
+                ui.label(egui::RichText::new(format!("Wind: {:.0}° @ {:.1}", wind_heading, wind.wind_speed))
+                    .size(10.0));
             });
         });
     
@@ -133,63 +139,121 @@ fn calculate_roll(transform: &Transform) -> f32 {
     f32::atan2(right.y, right.x.hypot(right.z)).to_degrees()
 }
 
-fn draw_compass_rose(ui: &mut egui::Ui, heading: f32) {
+fn calculate_wind_heading(wind: &Wind) -> f32 {
+    let dir = wind.wind_direction;
+    let angle = f32::atan2(dir.x, -dir.z).to_degrees() + 90.0;
+    if angle < 0.0 {
+        360.0 + angle
+    } else if angle >= 360.0 {
+        angle - 360.0
+    } else {
+        angle
+    }
+}
+
+fn draw_wind_compass(ui: &mut egui::Ui, aircraft_heading: f32, wind_heading: f32, wind_speed: f32) {
     let (response, painter) = ui.allocate_painter(
-        egui::Vec2::new(60.0, 20.0),
+        egui::Vec2::new(90.0, 90.0),
         egui::Sense::hover(),
     );
     
     let rect = response.rect;
-    let center_x = rect.center().x;
-    let center_y = rect.center().y;
+    let center = rect.center();
+    let radius = 30.0;
     
-    let directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-    let angles = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0];
+    painter.circle_stroke(
+        center,
+        radius,
+        egui::Stroke::new(1.5, egui::Color32::WHITE),
+    );
     
-    let pixels_per_degree = 1.0;
+    let directions = ["N", "E", "S", "W"];
+    let angles = [0.0, 90.0, 180.0, 270.0];
     
     for i in 0..directions.len() {
-        let angle = angles[i];
-        let mut diff = heading - angle;
+        let rotated_angle = angles[i] - aircraft_heading;
+        let angle_rad = (rotated_angle - 90.0).to_radians();
+        let pos = egui::Pos2::new(
+            center.x + (radius + 10.0) * angle_rad.cos(),
+            center.y + (radius + 10.0) * angle_rad.sin(),
+        );
         
-        if diff > 180.0 {
-            diff -= 360.0;
-        } else if diff < -180.0 {
-            diff += 360.0;
-        }
+        painter.text(
+            pos,
+            egui::Align2::CENTER_CENTER,
+            directions[i],
+            egui::FontId::proportional(15.0),
+            egui::Color32::WHITE,
+        );
+    }
+    
+    for deg in (0..360).step_by(30) {
+        let rotated_angle = deg as f32 - aircraft_heading;
+        let angle_rad = (rotated_angle - 90.0).to_radians();
+        let is_cardinal = deg % 90 == 0;
+        let tick_start = if is_cardinal { radius - 8.0 } else { radius - 4.0 };
         
-        let x_offset = -diff * pixels_per_degree;
-        let x_pos = center_x + x_offset;
+        let p1 = egui::Pos2::new(
+            center.x + tick_start * angle_rad.cos(),
+            center.y + tick_start * angle_rad.sin(),
+        );
+        let p2 = egui::Pos2::new(
+            center.x + radius * angle_rad.cos(),
+            center.y + radius * angle_rad.sin(),
+        );
         
-        if x_pos >= rect.left() - 20.0 && x_pos <= rect.right() + 20.0 {
-            let distance = (x_pos - center_x).abs();
-            let max_distance = 50.0;
-            let intensity = (1.0 - (distance / max_distance)).max(0.0).min(1.0);
-            
-            let color = egui::Color32::from_rgba_premultiplied(
-                (255.0 * intensity) as u8,
-                (255.0 * intensity) as u8,
-                (255.0 * intensity) as u8,
-                (255.0 * intensity) as u8,
-            );
-            
-            painter.text(
-                egui::Pos2::new(x_pos, center_y),
-                egui::Align2::CENTER_CENTER,
-                directions[i],
-                egui::FontId::proportional(22.0),
-                color,
-            );
-        }
+        painter.line_segment(
+            [p1, p2],
+            egui::Stroke::new(1.0, egui::Color32::GRAY),
+        );
     }
     
     painter.line_segment(
         [
-            egui::Pos2::new(center_x, rect.top()),
-            egui::Pos2::new(center_x, rect.top() + 5.0),
+            egui::Pos2::new(center.x, center.y - radius - 7.0),
+            egui::Pos2::new(center.x, center.y - radius + 7.0),
         ],
-        egui::Stroke::new(2.0, egui::Color32::YELLOW),
+        egui::Stroke::new(3.0, egui::Color32::WHITE),
     );
+    
+    let relative_wind_heading = wind_heading - aircraft_heading;
+    let wind_angle_rad = (relative_wind_heading - 90.0).to_radians();
+    let arrow_length = radius * 0.85;
+    
+    let tip = egui::Pos2::new(
+        center.x + arrow_length * wind_angle_rad.cos(),
+        center.y + arrow_length * wind_angle_rad.sin(),
+    );
+    
+    let wind_intensity = (wind_speed / 50.0).min(1.0);
+    let wind_color = egui::Color32::from_rgb(
+        (100.0 + 155.0 * wind_intensity) as u8,
+        (200.0 - 100.0 * wind_intensity) as u8,
+        255,
+    );
+    
+    painter.line_segment(
+        [center, tip],
+        egui::Stroke::new(2.5, wind_color),
+    );
+    
+    let arrow_head_size = 8.0;
+    let arrow_head_angle = 25.0_f32.to_radians();
+    
+    let left_angle = wind_angle_rad + std::f32::consts::PI - arrow_head_angle;
+    let right_angle = wind_angle_rad + std::f32::consts::PI + arrow_head_angle;
+    
+    let left_point = egui::Pos2::new(
+        tip.x + arrow_head_size * left_angle.cos(),
+        tip.y + arrow_head_size * left_angle.sin(),
+    );
+    let right_point = egui::Pos2::new(
+        tip.x + arrow_head_size * right_angle.cos(),
+        tip.y + arrow_head_size * right_angle.sin(),
+    );
+    
+    painter.line_segment([tip, left_point], egui::Stroke::new(2.5, wind_color));
+    painter.line_segment([tip, right_point], egui::Stroke::new(2.5, wind_color));
 }
 
 fn draw_artificial_horizon(ui: &mut egui::Ui, pitch: f32, roll: f32) {

@@ -420,8 +420,8 @@ pub fn debugger_ui(
             // --- Base Wind Evolution ---
             ui.label(egui::RichText::new("Base Wind Evolution (Time-based)").strong());
             ui.add(egui::Slider::new(&mut wind.wind_evolution_speed, 0.0..=0.5).text("Evolution Speed"));
-            ui.add(egui::Slider::new(&mut wind.min_wind_speed, 0.0..=50.0).text("Min Wind Speed"));
-            ui.add(egui::Slider::new(&mut wind.max_wind_speed, 0.0..=100.0).text("Max Wind Speed"));
+            ui.add(egui::Slider::new(&mut wind.min_wind_speed, 0.0..=100.0).text("Min Wind Speed"));
+            ui.add(egui::Slider::new(&mut wind.max_wind_speed, 0.0..=200.0).text("Max Wind Speed"));
             
             ui.separator();
             

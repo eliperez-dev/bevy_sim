@@ -279,6 +279,23 @@ pub fn camera_controls(
             
             // We can also skip .length() and just use current_speed directly
             let wind_acceleration = wind_dot * current_speed * 0.3;
+            
+            // D2. Macro Wind Rotational Effects (similar to turbulence)
+            let right = plane_transform.right().as_vec3();
+            let up = plane_transform.up().as_vec3();
+            
+            // Project wind onto aircraft's local axes
+            let wind_lateral = current_wind.dot(right);
+            let wind_vertical = current_wind.dot(up);
+            let wind_forward = current_wind.dot(forward);
+            
+            // Cross-wind causes roll and yaw
+            let macro_wind_coupling = 0.003 * (current_speed / 20.0).min(2.0);
+            let macro_wind_roll = -wind_lateral * macro_wind_coupling * 2.0;
+            let macro_wind_yaw = wind_lateral * macro_wind_coupling * 0.2;
+            
+            // Vertical wind causes pitch
+            let macro_wind_pitch = wind_vertical * macro_wind_coupling * 0.8;
 
             // E. Parasitic drag
             let high_speed_multiplier = 1.0 + (airspeed_ratio.max(1.0) - 1.0) * 0.5;
@@ -376,6 +393,11 @@ pub fn camera_controls(
             aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
             aircraft.roll_velocity += turbulence_roll * turbulence_scale * dt;
             aircraft.yaw_velocity += turbulence_yaw * turbulence_scale * dt;
+            
+            // Apply macro wind rotational effects
+            aircraft.pitch_velocity += macro_wind_pitch * dt;
+            aircraft.roll_velocity += macro_wind_roll * dt;
+            aircraft.yaw_velocity += macro_wind_yaw * dt;
 
             // --- DAMPING & MOVEMENT (Always applies) ---
             aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
@@ -443,17 +465,24 @@ pub fn evolve_wind(
     time: Res<Time>,
 ) {
     let t = time.elapsed_secs_f64();
+    let dt = time.delta_secs();
     let evolution_speed = wind.wind_evolution_speed;
     
-    let dir_x = wind.perlin.get([t * evolution_speed, 0.0, 0.0]) as f32;
-    let dir_y = wind.perlin.get([0.0, t * evolution_speed, 1000.0]) as f32;
-    let dir_z = wind.perlin.get([1000.0, 0.0, t * evolution_speed]) as f32;
+    let yaw_noise = wind.perlin.get([t * evolution_speed, 0.0, 0.0]) as f32;
+    let pitch_noise = wind.perlin.get([0.0, t * evolution_speed, 1000.0]) as f32;
     
-    let noise_direction = Vec3::new(dir_x, dir_y, dir_z);
+    let yaw_rotation_speed = yaw_noise * 0.5;
+    let pitch_rotation_speed = pitch_noise * 0.1;
     
-    if noise_direction.length_squared() > 0.001 {
-        wind.wind_direction = noise_direction.normalize();
-    }
+    let yaw_rotation = Quat::from_rotation_y(yaw_rotation_speed * dt);
+    let right_axis = Vec3::new(-wind.wind_direction.z, 0.0, wind.wind_direction.x).normalize_or_zero();
+    let pitch_rotation = if right_axis.length_squared() > 0.001 {
+        Quat::from_axis_angle(right_axis, pitch_rotation_speed * dt)
+    } else {
+        Quat::IDENTITY
+    };
+    
+    wind.wind_direction = (yaw_rotation * pitch_rotation * wind.wind_direction).normalize();
     
     let speed_noise = wind.perlin.get([t * evolution_speed + 5000.0, t * evolution_speed + 5000.0, 0.0]) as f32;
     let speed_range = wind.max_wind_speed - wind.min_wind_speed;
