@@ -460,7 +460,7 @@ pub fn debugger_ui(
 
             // --- Micro Turbulence ---
             ui.label(egui::RichText::new("Micro Turbulence (Gusts)").strong());
-            ui.add(egui::Slider::new(&mut wind.turbulence_intensity, 0.0..=2.0).text("Intensity"));
+            ui.add(egui::Slider::new(&mut wind.turbulence_intensity, 0.0..=0.10).text("Intensity").logarithmic(true));
             ui.add(egui::Slider::new(&mut wind.turbulence_frequency, 0.1..=10.0).text("Frequency"));
             ui.add(egui::Slider::new(&mut wind.gust_frequency_multiplier, 0.0001..=0.01).text("Gust Multiplier"));
         });

@@ -134,7 +134,7 @@ impl Default for Wind {
             max_angle_shift: std::f32::consts::FRAC_PI_2,
             
             turbulence_intensity: 0.008,
-            turbulence_frequency: 4.0,
+            turbulence_frequency: 6.0,
             gust_frequency_multiplier: 0.00075,
             
             perlin: Perlin::new(42),
@@ -348,23 +348,25 @@ pub fn camera_controls(
             let turb_sample_x = pos.x as f64 - wind_drift.x as f64;
             let turb_sample_z = pos.z as f64 - wind_drift.z as f64;
 
-            let turbulence_pitch = wind.perlin.get([turb_sample_x * freq, turb_sample_z * freq, t * freq]) as f32;
-            let turbulence_roll = wind.perlin.get([turb_sample_z * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32 ;
-            let turbulence_yaw = wind.perlin.get([pos.y as f64 * freq, turb_sample_x * freq, t * freq + 200.0]) as f32;
-            
-            let turbulance_pow = 5.5;
-            let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(turbulance_pow);
-            aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
-            aircraft.roll_velocity += turbulence_roll * turbulence_scale * dt;
-            aircraft.yaw_velocity += turbulence_yaw * turbulence_scale * dt;
-
             let gust_freq = freq * wind.gust_frequency_multiplier;
             let turbulence_velocity_x = wind.perlin.get([turb_sample_x * gust_freq, t * gust_freq, turb_sample_z * gust_freq + 300.0]) as f32;
             let turbulence_velocity_y = wind.perlin.get([pos.y as f64 * gust_freq, t * gust_freq, turb_sample_x * gust_freq + 400.0]) as f32;
             let turbulence_velocity_z = wind.perlin.get([turb_sample_z * gust_freq, t * gust_freq, pos.y as f64 * gust_freq + 500.0]) as f32;
             
             let turbulence_force = Vec3::new(turbulence_velocity_x, turbulence_velocity_y, turbulence_velocity_z);
+            let turbulance_pow = 5.5;
             let turbulence_velocity_scale = wind.turbulence_intensity * 85.0 * (airspeed_ratio + 0.5).powf(turbulance_pow);
+            
+            // Couple translational turbulence to rotational effects
+            let coupling_strength = 0.7;
+            let turbulence_pitch = turbulence_velocity_y * coupling_strength;
+            let turbulence_roll = -turbulence_velocity_x * coupling_strength * 1.25;
+            let turbulence_yaw = turbulence_velocity_x * coupling_strength / 1.5;
+            
+            let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(turbulance_pow);
+            aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
+            aircraft.roll_velocity += turbulence_roll * turbulence_scale * dt;
+            aircraft.yaw_velocity += turbulence_yaw * turbulence_scale * dt;
 
             // --- DAMPING & MOVEMENT (Always applies) ---
             aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
