@@ -107,6 +107,11 @@ pub struct Wind {
     pub wind_direction: Vec3, // Keep this normalized!
     pub wind_speed: f32,      // Pure scalar speed
     
+    // --- Base Wind Evolution (Time-based changes) ---
+    pub wind_evolution_speed: f64,
+    pub min_wind_speed: f32,
+    pub max_wind_speed: f32,
+    
     // --- Macro Wind (Large sweeping weather patterns) ---
     pub macro_wind_freq: f64,
     pub weather_evolution_rate: f64,
@@ -128,6 +133,10 @@ impl Default for Wind {
             
             // 11.18 is roughly the speed (length) of your old Vec3(10.0, 0.0, 5.0)
             wind_speed: 11.18, 
+            
+            wind_evolution_speed: 0.05,
+            min_wind_speed: 5.0,
+            max_wind_speed: 35.0,
             
             macro_wind_freq: 0.001,
             weather_evolution_rate: 0.85,
@@ -428,6 +437,28 @@ pub fn camera_controls(
     }
 }
 
+
+pub fn evolve_wind(
+    mut wind: ResMut<Wind>,
+    time: Res<Time>,
+) {
+    let t = time.elapsed_secs_f64();
+    let evolution_speed = wind.wind_evolution_speed;
+    
+    let dir_x = wind.perlin.get([t * evolution_speed, 0.0, 0.0]) as f32;
+    let dir_y = wind.perlin.get([0.0, t * evolution_speed, 1000.0]) as f32;
+    let dir_z = wind.perlin.get([1000.0, 0.0, t * evolution_speed]) as f32;
+    
+    let noise_direction = Vec3::new(dir_x, dir_y, dir_z);
+    
+    if noise_direction.length_squared() > 0.001 {
+        wind.wind_direction = noise_direction.normalize();
+    }
+    
+    let speed_noise = wind.perlin.get([t * evolution_speed + 5000.0, t * evolution_speed + 5000.0, 0.0]) as f32;
+    let speed_range = wind.max_wind_speed - wind.min_wind_speed;
+    wind.wind_speed = wind.min_wind_speed + (speed_noise + 1.0) * 0.5 * speed_range;
+}
 
 pub fn camera_follow_aircraft(
     time: Res<Time>,

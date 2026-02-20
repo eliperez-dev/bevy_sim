@@ -92,6 +92,7 @@ fn main() {
         .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
         .add_systems(Startup, (setup, setup_camera_fog, spawn_stars).chain())
         .add_systems(Update, (
+            evolve_wind,
             camera_controls, 
             update_debugger, 
             generate_chunks, 
@@ -416,32 +417,21 @@ pub fn debugger_ui(
         // 2. WIND & WEATHER
         // ==========================================
         ui.collapsing("🌪 Wind & Weather", |ui| {
-            // --- Base Wind ---
-            ui.label(egui::RichText::new("Base Wind Vector").strong());
+            // --- Base Wind Evolution ---
+            ui.label(egui::RichText::new("Base Wind Evolution (Time-based)").strong());
+            ui.add(egui::Slider::new(&mut wind.wind_evolution_speed, 0.0..=0.5).text("Evolution Speed"));
+            ui.add(egui::Slider::new(&mut wind.min_wind_speed, 0.0..=50.0).text("Min Wind Speed"));
+            ui.add(egui::Slider::new(&mut wind.max_wind_speed, 0.0..=100.0).text("Max Wind Speed"));
+            
+            ui.separator();
+            
+            // --- Current Base Wind (Read-only display) ---
+            ui.label(egui::RichText::new("Current Base Wind (Live)").strong());
             ui.horizontal(|ui| {
-            let mut dir_changed = false;
-            
-            ui.label("Dir X:"); 
-            dir_changed |= ui.add(egui::DragValue::new(&mut wind.wind_direction.x).speed(0.05)).changed();
-            
-            ui.label("Y:"); 
-            dir_changed |= ui.add(egui::DragValue::new(&mut wind.wind_direction.y).speed(0.05)).changed();
-            
-            ui.label("Z:"); 
-            dir_changed |= ui.add(egui::DragValue::new(&mut wind.wind_direction.z).speed(0.05)).changed();
-
-            // Ensure the vector stays normalized if the user drags any of the values
-            if dir_changed {
-                if wind.wind_direction.length_squared() > 0.001 {
-                    wind.wind_direction = wind.wind_direction.normalize();
-                } else {
-                    // Fallback if the user somehow drags all values exactly to 0
-                    wind.wind_direction = Vec3::X; 
-                }
-            }});
-
-            // Wind speed is now entirely decoupled, so we can just bind it directly to the slider!
-            ui.add(egui::Slider::new(&mut wind.wind_speed, 0.0..=100.0).text("Total Speed"));
+                ui.label(format!("Direction: [{:.2}, {:.2}, {:.2}]", 
+                    wind.wind_direction.x, wind.wind_direction.y, wind.wind_direction.z));
+            });
+            ui.label(format!("Speed: {:.1}", wind.wind_speed));
 
             ui.separator();
 
