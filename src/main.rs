@@ -347,11 +347,20 @@ pub fn debugger_ui(
             });
             
             ui.collapsing("Flight Model Tuning", |ui| {
-                ui.label("Forces");
-                ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed (Level)"));
-                ui.add(egui::Slider::new(&mut aircraft.drag_factor, 0.1..=2.0).text("Drag (Acceleration)"));
-                ui.add(egui::Slider::new(&mut aircraft.gravity, 0.0..=100.0).text("Gravity (Climb/Dive Effect)"));
-                ui.add(egui::Slider::new(&mut aircraft.g_force_drag, 0.0..=500.0).text("Turn Drag (Energy Bleed)"));
+                ui.label("Engine & Speed");
+                ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed"));
+                ui.add(egui::Slider::new(&mut aircraft.thrust, 0.1..=2.0).text("Engine Response"));
+                
+                ui.separator();
+                ui.label("Lift & Gravity");
+                ui.add(egui::Slider::new(&mut aircraft.gravity, 0.0..=300.0).text("Gravity Force"));
+                ui.add(egui::Slider::new(&mut aircraft.lift_coefficient, 0.0..=10.0).text("Lift Coefficient"));
+                ui.add(egui::Slider::new(&mut aircraft.lift_reduction_factor, 0.0..=100.0).text("Lift Reduction Factor"));
+                
+                ui.separator();
+                ui.label("Drag");
+                ui.add(egui::Slider::new(&mut aircraft.parasitic_drag_coef, 0.0..=50.0).text("Parasitic Drag"));
+                ui.add(egui::Slider::new(&mut aircraft.g_force_drag, 0.0..=10.0).text("G-Force Drag"));
 
                 ui.separator();
                 ui.label("Responsiveness");

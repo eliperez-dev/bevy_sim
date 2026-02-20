@@ -18,10 +18,13 @@ pub struct Aircraft {
 
     // --- TUNING ---
     pub max_speed: f32,
-    pub max_throttle: f32,       // Maximum throttle (1.0 = 100%, 1.3 = 130%)
-    pub drag_factor: f32,        // How fast engine reaches target speed
+    pub max_throttle: f32,       
+    pub thrust: f32,        // Now acts as the core engine power multiplier
     pub gravity: f32,            // How much climbing slows you / diving speeds you up
     pub g_force_drag: f32,       // Speed loss when turning hard
+    pub lift_coefficient: f32,   // How much lift is generated at optimal AoA
+    pub lift_reduction_factor: f32, // How much lift reduces gravity effect
+    pub parasitic_drag_coef: f32, // Parasitic drag coefficient
     
     pub pitch_strength: f32,
     pub roll_strength: f32,
@@ -43,9 +46,12 @@ impl Default for Aircraft {
             // Default Physics Values
             max_speed: 350.0,
             max_throttle: 1.5,
-            drag_factor: 0.5,
-            gravity: 150.0,       
-            g_force_drag: 0.3,
+            thrust: 1.5,
+            gravity: 80.0,       
+            g_force_drag: 0.4,
+            lift_coefficient: 2.5,
+            lift_reduction_factor: 30.0,
+            parasitic_drag_coef: 5.0,
             pitch_strength: 2.0,
             roll_strength: 3.0,
             yaw_strength: 1.0,
@@ -141,33 +147,53 @@ pub fn camera_controls(
             aircraft.throttle = (aircraft.throttle - 0.5 * dt).max(0.0);
         }
 
-        // A. Engine Acceleration
-        let target_speed = aircraft.throttle * aircraft.max_speed;
-        let engine_acceleration = (target_speed - aircraft.speed) * aircraft.drag_factor;
+        let forward = plane_transform.forward().as_vec3();
+        let climb_angle = forward.y;
         
-        // B. Climb/Dive Acceleration (Gravity)
-        let climb_angle = plane_transform.forward().y;
-        let gravity_acceleration = -climb_angle * aircraft.gravity;
+        let airspeed_ratio = aircraft.speed / aircraft.max_speed;
+        let dynamic_pressure = airspeed_ratio.powi(2);
 
-        // C. Induced Drag (G-force based)
+        // A. Engine Acceleration (Thrust Falloff)
+        // Real engines lose effective thrust as you approach their maximum exhaust velocity.
+        // We simulate this so your top speed is naturally limited WITHOUT needing massive drag.
+        // A. Engine Acceleration (Thrust Falloff)
+        let base_thrust = 50.0 * aircraft.thrust; 
+        
+        // Let the "wall" move dynamically based on your throttle
+        let max_effective_ratio = aircraft.throttle + 0.2; 
+        let high_speed_falloff = (max_effective_ratio - airspeed_ratio).clamp(0.0, 1.0); 
+        
+        let engine_acceleration = aircraft.throttle * base_thrust * high_speed_falloff;
+        
+        // B. Lift & Gravity Physics
+        // Gravity always acts along flight path (negative climb = gain speed)
+        let gravity_acceleration = -climb_angle * aircraft.gravity;
+        
+        // Lift reduces effective gravity when flying level
+        let lift_efficiency = (1.0 - climb_angle.abs()).max(0.3);
+        let lift_reduction = aircraft.lift_coefficient * dynamic_pressure * lift_efficiency * aircraft.lift_reduction_factor;
+        let effective_gravity_accel = gravity_acceleration.abs() - lift_reduction;
+        let gravity_acceleration = gravity_acceleration.signum() * effective_gravity_accel.max(0.0);
+
+        // C. Turn Drag (G-forces from maneuvers)
         let centripetal_accel = aircraft.speed * aircraft.pitch_velocity.abs();
         let g_force = centripetal_accel / 9.8;
         let turn_drag = g_force * aircraft.g_force_drag;
 
         // D. Wind Force (headwind/tailwind effect)
-        let forward = plane_transform.forward().as_vec3();
         let wind_dot = forward.dot(wind.base_wind.normalize_or_zero());
         let wind_acceleration = wind_dot * wind.base_wind.length() * 0.3;
 
-        // E. Quadratic drag (increases with speed²)
-        let speed_drag = (aircraft.speed / aircraft.max_speed).powi(2) * 5.0;
+        // E. Parasitic drag (increases with speed²)
+        // Because the engine naturally limits top speed, drag can be kept purely aerodynamic.
+        // This gives you that smooth, realistic gliding feeling when you cut the throttle!
+        let parasitic_drag = dynamic_pressure * aircraft.parasitic_drag_coef;
 
         // Apply all accelerations
-        aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag - speed_drag + wind_acceleration) * dt;
+        aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag - parasitic_drag + wind_acceleration) * dt;
         aircraft.speed = aircraft.speed.max(0.0);
 
         // 2. AERODYNAMICS
-        let airspeed_ratio = aircraft.speed / aircraft.max_speed;
         let control_effectiveness = get_control_effectiveness(airspeed_ratio);
 
         let pitch_strength = aircraft.pitch_strength * control_effectiveness;
