@@ -312,7 +312,6 @@ fn update_debugger(
 
 
 
-
 pub fn debugger_ui(
     mut contexts: EguiContexts,
     mut day_cycle: ResMut<DayNightCycle>,
@@ -325,31 +324,37 @@ pub fn debugger_ui(
     mut wind: ResMut<Wind>,
 ) -> Result<(), > { 
     
-    egui::Window::new("Debugger").show(contexts.ctx_mut()?, |ui| {
+    egui::Window::new("Simulation Debugger").show(contexts.ctx_mut()?, |ui| {
         render_settings.just_updated = false;
 
-        // --- AIRCRAFT SETTINGS ---
-        ui.heading("Aircraft Physics");
-        if let Ok(mut aircraft) = aircraft_query.single_mut() {
-            ui.collapsing("Current Values", |ui| {
-                let airspeed_ratio = aircraft.speed / aircraft.max_speed;
-                let centripetal_accel = aircraft.speed * aircraft.pitch_velocity.abs();
-                let g_force = centripetal_accel / 9.8;
-                let turn_drag = g_force * aircraft.g_force_drag;
-                let speed_drag = (airspeed_ratio).powi(2) * 20.0;
+        // ==========================================
+        // 1. AIRCRAFT PHYSICS
+        // ==========================================
+        ui.collapsing("✈ Aircraft Physics", |ui| {
+            if let Ok(mut aircraft) = aircraft_query.single_mut() {
+                // --- Telemetry (Read Only) ---
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Live Telemetry").strong());
+                    let airspeed_ratio = aircraft.speed / aircraft.max_speed;
+                    let centripetal_accel = aircraft.speed * aircraft.pitch_velocity.abs();
+                    let g_force = centripetal_accel / 9.8;
+                    let turn_drag = g_force * aircraft.g_force_drag;
+                    let speed_drag = (airspeed_ratio).powi(2) * 20.0;
+                    
+                    ui.label(format!("Speed: {:.1} ({:.0}%)", aircraft.speed, airspeed_ratio * 100.0));
+                    ui.label(format!("Control Effect: {:.0}%", controls::get_control_effectiveness(airspeed_ratio) * 100.0));
+                    ui.label(format!("G-Force: {:.2}G", g_force));
+                    ui.label(format!("Turn Drag / Speed Drag: {:.2} / {:.2}", turn_drag, speed_drag));
+                });
                 
-                ui.label(format!("Speed: {:.1} ({:.0}%)", aircraft.speed, airspeed_ratio * 100.0));
-                ui.label(format!("Control Effectiveness: {:.0}%", controls::get_control_effectiveness(airspeed_ratio) * 100.0));
-                ui.label(format!("Pitch Velocity: {:.3}", aircraft.pitch_velocity));
-                ui.label(format!("G-Force: {:.2}G", g_force));
-                ui.label(format!("Turn Drag: {:.2}", turn_drag));
-                ui.label(format!("Speed Drag: {:.2}", speed_drag));
-            });
-            
-            ui.collapsing("Flight Model Tuning", |ui| {
-                ui.label("Engine & Speed");
+                // --- Tuning Sliders ---
+                ui.label(egui::RichText::new("Flight Model Tuning").strong());
+                
+                ui.label("Engine & Drag");
                 ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed"));
                 ui.add(egui::Slider::new(&mut aircraft.thrust, 0.1..=2.0).text("Engine Response"));
+                ui.add(egui::Slider::new(&mut aircraft.parasitic_drag_coef, 0.0..=50.0).text("Parasitic Drag"));
+                ui.add(egui::Slider::new(&mut aircraft.g_force_drag, 0.0..=10.0).text("G-Force Drag"));
                 
                 ui.separator();
                 ui.label("Lift & Gravity");
@@ -358,112 +363,128 @@ pub fn debugger_ui(
                 ui.add(egui::Slider::new(&mut aircraft.lift_reduction_factor, 0.0..=100.0).text("Lift Reduction Factor"));
                 
                 ui.separator();
-                ui.label("Drag");
-                ui.add(egui::Slider::new(&mut aircraft.parasitic_drag_coef, 0.0..=50.0).text("Parasitic Drag"));
-                ui.add(egui::Slider::new(&mut aircraft.g_force_drag, 0.0..=10.0).text("G-Force Drag"));
-
-                ui.separator();
-                ui.label("Responsiveness");
-                ui.add(egui::Slider::new(&mut aircraft.pitch_strength, 0.5..=10.0).text("Pitch Strength"));
-                ui.add(egui::Slider::new(&mut aircraft.roll_strength, 0.5..=10.0).text("Roll Strength"));
-                ui.add(egui::Slider::new(&mut aircraft.yaw_strength, 0.5..=10.0).text("Yaw Strength"));
-
-                ui.separator();
-                ui.label("Assists");
+                ui.label("Responsiveness & Assists");
+                ui.horizontal(|ui| {
+                    ui.add(egui::Slider::new(&mut aircraft.pitch_strength, 0.5..=10.0).text("Pitch"));
+                    ui.add(egui::Slider::new(&mut aircraft.roll_strength, 0.5..=10.0).text("Roll"));
+                    ui.add(egui::Slider::new(&mut aircraft.yaw_strength, 0.5..=10.0).text("Yaw"));
+                });
                 ui.add(egui::Slider::new(&mut aircraft.bank_turn_strength, 0.0..=5.0).text("Auto-Turn (Bank)"));
                 ui.add(egui::Slider::new(&mut aircraft.auto_level_strength, 0.0..=5.0).text("Auto-Level (Stability)"));
-            });
-        } else {
-            ui.label("No Aircraft found.");
-        }
-        ui.separator();
-
-        // --- WIND SETTINGS ---
-        ui.heading("Wind & Turbulence");
-        ui.collapsing("Wind Settings", |ui| {
-            let mut wind_speed = wind.base_wind.length();
-            let wind_direction = if wind_speed > 0.01 {
-                wind.base_wind / wind_speed
             } else {
-                Vec3::new(1.0, 0.0, 0.0)
-            };
-            
-            ui.label("Wind Speed");
-            if ui.add(egui::Slider::new(&mut wind_speed, 0.0..=100.0).text("Speed")).changed() {
-                wind.base_wind = wind_direction * wind_speed;
+                ui.label(egui::RichText::new("No Aircraft found in scene.").color(egui::Color32::RED));
             }
-            
-            ui.separator();
-            ui.label("Wind Direction (Vector)");
+        });
+
+        // ==========================================
+        // 2. WIND & WEATHER
+        // ==========================================
+        ui.collapsing("🌪 Wind & Weather", |ui| {
+            // --- Base Wind ---
+            ui.label(egui::RichText::new("Base Wind Vector").strong());
             ui.horizontal(|ui| {
-                ui.label("X:");
-                ui.add(egui::DragValue::new(&mut wind.base_wind.x).speed(0.5));
-                ui.label("Y:");
-                ui.add(egui::DragValue::new(&mut wind.base_wind.y).speed(0.5));
-                ui.label("Z:");
-                ui.add(egui::DragValue::new(&mut wind.base_wind.z).speed(0.5));
-            });
+            let mut dir_changed = false;
             
+            ui.label("Dir X:"); 
+            dir_changed |= ui.add(egui::DragValue::new(&mut wind.wind_direction.x).speed(0.05)).changed();
+            
+            ui.label("Y:"); 
+            dir_changed |= ui.add(egui::DragValue::new(&mut wind.wind_direction.y).speed(0.05)).changed();
+            
+            ui.label("Z:"); 
+            dir_changed |= ui.add(egui::DragValue::new(&mut wind.wind_direction.z).speed(0.05)).changed();
+
+            // Ensure the vector stays normalized if the user drags any of the values
+            if dir_changed {
+                if wind.wind_direction.length_squared() > 0.001 {
+                    wind.wind_direction = wind.wind_direction.normalize();
+                } else {
+                    // Fallback if the user somehow drags all values exactly to 0
+                    wind.wind_direction = Vec3::X; 
+                }
+            }});
+
+            // Wind speed is now entirely decoupled, so we can just bind it directly to the slider!
+            ui.add(egui::Slider::new(&mut wind.wind_speed, 0.0..=100.0).text("Total Speed"));
+
             ui.separator();
-            ui.label("Turbulence");
-            ui.add(egui::Slider::new(&mut wind.turbulence_intensity, 0.0..=2.0).text("Intensity").logarithmic(true));
-            ui.add(egui::Slider::new(&mut wind.turbulence_frequency, 0.01..=10.0).text("Frequency"));
-        });
-        ui.separator();
 
-        // --- WORLD GEN SETTINGS ---
-        ui.heading("Time Settings");
-        ui.add(egui::Slider::new(&mut day_cycle.time_of_day, 0.0..=1.0).text("Time of Day"));
-        ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.1).text("Time Speed"));
-        ui.add(egui::Slider::new(&mut day_cycle.inclination, -1.0..=1.0).text("Inclination"));
-
-        ui.separator();
-
-        ui.collapsing("Render Settings", |ui| {
-        ui.heading("Render Settings");
-        ui.checkbox(&mut wireframe_config.global, "Global Wireframe");
-
-        if ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance")).changed() {
-            render_settings.just_updated = true;
-        }
-
-        ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=500).text("Max Chunks / Frame"));
-
-        if ui.add(egui::Slider::new(&mut render_settings.cascades, 0..=4).text("Cascades")).changed() {
-            render_settings.just_updated = true;
-        }
-        
-        if ui.add(egui::Slider::new(&mut render_settings.terrain_smoothness, 0.0..=1.0).text("Terrain Smoothness")).changed() {
-            render_settings.just_updated = true;
-        }
-
-        if ui.checkbox(&mut render_settings.compute_smooth_normals, "Smooth Normals").changed() {
-            render_settings.just_updated = true;
-        }
-        
-        if ui.add(egui::Slider::new(&mut chunk_manager.lod_quality_multiplier, 1..=4).text("LOD Quality")).changed() {
-            render_settings.just_updated = true;
-        }
-
-        if ui.add(egui::Slider::new(&mut chunk_manager.lod_distance_multiplier, 1.0..=15.0).text("LOD Distance")).changed() {
-            render_settings.just_updated = true;
-        }
-
-        if let Ok(mut fog) = fog_query.single_mut() {
-             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
-                ui.add(egui::Slider::new(density, 0.000005..=0.001).text("Fog Density").logarithmic(true));
+            // --- Macro Weather ---
+            ui.label(egui::RichText::new("Macro Weather (Large Fronts)").strong());
+            ui.add(egui::Slider::new(&mut wind.macro_wind_freq, 0.001..=0.05).text("Pattern Size (Freq)"));
+            ui.add(egui::Slider::new(&mut wind.weather_evolution_rate, 0.0..=1.0).text("Evolution Rate"));
+            
+            // Convert radians to degrees for the UI, then save back to radians
+            let mut angle_deg = wind.max_angle_shift.to_degrees();
+            if ui.add(egui::Slider::new(&mut angle_deg, 0.0..=180.0).text("Max Direction Shift (Deg)")).changed() {
+                wind.max_angle_shift = angle_deg.to_radians();
             }
-        }
+
+            ui.separator();
+
+            // --- Micro Turbulence ---
+            ui.label(egui::RichText::new("Micro Turbulence (Gusts)").strong());
+            ui.add(egui::Slider::new(&mut wind.turbulence_intensity, 0.0..=2.0).text("Intensity"));
+            ui.add(egui::Slider::new(&mut wind.turbulence_frequency, 0.1..=10.0).text("Frequency"));
+            ui.add(egui::Slider::new(&mut wind.gust_frequency_multiplier, 0.0001..=0.01).text("Gust Multiplier"));
+        });
+
+        // ==========================================
+        // 3. WORLD & TIME
+        // ==========================================
+        ui.collapsing("🌍 World & Time", |ui| {
+            ui.add(egui::Slider::new(&mut day_cycle.time_of_day, 0.0..=1.0).text("Time of Day"));
+            ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.1).text("Time Speed"));
+            ui.add(egui::Slider::new(&mut day_cycle.inclination, -1.0..=1.0).text("Inclination"));
+        });
+
+        // ==========================================
+        // 4. RENDER SETTINGS
+        // ==========================================
+        ui.collapsing("📷 Render Settings", |ui| {
+            ui.checkbox(&mut wireframe_config.global, "Global Wireframe");
+
+            if ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance")).changed() {
+                render_settings.just_updated = true;
+            }
+            ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=500).text("Max Gen / Frame"));
+
+            if ui.add(egui::Slider::new(&mut render_settings.cascades, 0..=4).text("Cascades")).changed() {
+                render_settings.just_updated = true;
+            }
+            if ui.add(egui::Slider::new(&mut render_settings.terrain_smoothness, 0.0..=1.0).text("Terrain Smoothness")).changed() {
+                render_settings.just_updated = true;
+            }
+            if ui.checkbox(&mut render_settings.compute_smooth_normals, "Smooth Normals").changed() {
+                render_settings.just_updated = true;
+            }
+            if ui.add(egui::Slider::new(&mut chunk_manager.lod_quality_multiplier, 1..=4).text("LOD Quality")).changed() {
+                render_settings.just_updated = true;
+            }
+            if ui.add(egui::Slider::new(&mut chunk_manager.lod_distance_multiplier, 1.0..=15.0).text("LOD Distance")).changed() {
+                render_settings.just_updated = true;
+            }
+
+            if let Ok(mut fog) = fog_query.single_mut() {
+                 if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
+                    ui.add(egui::Slider::new(density, 0.000005..=0.001).text("Fog Density").logarithmic(true));
+                }
+            }
         });
         
-        if ui.button("Reset Simulation").clicked() {
+        // ==========================================
+        // FOOTER
+        // ==========================================
+        ui.separator();
+        if ui.button("Reset Simulation State").clicked() {
             day_cycle.time_of_day = 0.5;
             if let Ok(mut aircraft) = aircraft_query.single_mut() {
-                aircraft.speed = 100.0;
-                aircraft.throttle = 0.5;
+                aircraft.speed = 250.0;
+                aircraft.throttle = 0.8;
             }
         }
     });
+    
     Ok(())
 }
 

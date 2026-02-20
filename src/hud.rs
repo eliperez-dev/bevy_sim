@@ -18,15 +18,12 @@ pub fn flight_hud_system(
 
     let altitude = plane_transform.translation.y;
     let speed = aircraft.speed;
-    let throttle = aircraft.throttle * 100.0;
     
     let forward = plane_transform.forward().as_vec3();
     let heading = calculate_heading(forward);
     let pitch = calculate_pitch(forward);
     let roll = calculate_roll(plane_transform);
     
-    let current_time = time.elapsed_secs();
-
     let ctx = contexts.ctx_mut().unwrap();
     let window_frame = Frame::default().fill(bevy_egui::egui::Color32::from_rgba_unmultiplied(50, 50, 50, 100));
     

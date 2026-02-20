@@ -10,6 +10,7 @@ pub struct MainCamera;
 #[derive(Component)]
 pub struct Aircraft {
     // --- STATE ---
+    pub velocity: Vec3,
     pub speed: f32,
     pub throttle: f32,
     pub pitch_velocity: f32,
@@ -37,6 +38,7 @@ pub struct Aircraft {
 impl Default for Aircraft {
     fn default() -> Self {
         Self {
+            velocity: Vec3::ZERO,
             speed: 150.0,
             throttle: 0.80,
             pitch_velocity: 0.0,
@@ -84,18 +86,39 @@ impl Default for ControlMode {
 
 #[derive(Resource)]
 pub struct Wind {
-    pub base_wind: Vec3,
+    pub wind_direction: Vec3, // Keep this normalized!
+    pub wind_speed: f32,      // Pure scalar speed
+    
+    // --- Macro Wind (Large sweeping weather patterns) ---
+    pub macro_wind_freq: f64,
+    pub weather_evolution_rate: f64,
+    pub max_angle_shift: f32,
+    
+    // --- Micro Wind (Turbulence & Gusts) ---
     pub turbulence_intensity: f32,
     pub turbulence_frequency: f32,
+    pub gust_frequency_multiplier: f64,
+    
     pub perlin: Perlin,
 }
 
 impl Default for Wind {
     fn default() -> Self {
         Self {
-            base_wind: Vec3::new(10.0, 0.0, 5.0),
+            // We normalize this so it strictly represents a direction/heading
+            wind_direction: Vec3::new(2.0, 0.0, 1.0).normalize(), 
+            
+            // 11.18 is roughly the speed (length) of your old Vec3(10.0, 0.0, 5.0)
+            wind_speed: 11.18, 
+            
+            macro_wind_freq: 0.001,
+            weather_evolution_rate: 0.85,
+            max_angle_shift: std::f32::consts::FRAC_PI_2,
+            
             turbulence_intensity: 0.008,
             turbulence_frequency: 4.0,
+            gust_frequency_multiplier: 0.0005,
+            
             perlin: Perlin::new(42),
         }
     }
@@ -139,165 +162,203 @@ pub fn camera_controls(
     // --- AIRCRAFT PHYSICS (Always runs unless paused) ---
     if !control_mode.physics_paused {
         if let Ok((mut plane_transform, mut aircraft)) = aircraft_query.single_mut() {
-        // 1. ENGINE & DRAG
-        if keyboard.pressed(KeyCode::Equal) {
-            aircraft.throttle = (aircraft.throttle + 0.5 * dt).min(aircraft.max_throttle);
-        }
-        if keyboard.pressed(KeyCode::Minus) {
-            aircraft.throttle = (aircraft.throttle - 0.5 * dt).max(0.0);
-        }
+            // Get position and time early so we can use them for all noise calculations
+            let pos = plane_transform.translation;
+            let t = time.elapsed_secs_f64() as f64;
 
-        let forward = plane_transform.forward().as_vec3();
-        let climb_angle = forward.y;
-        
-        let airspeed_ratio = aircraft.speed / aircraft.max_speed;
-        let dynamic_pressure = airspeed_ratio.powi(2);
-
-        // A. Engine Acceleration (Thrust Falloff)
-        // Real engines lose effective thrust as you approach their maximum exhaust velocity.
-        // We simulate this so your top speed is naturally limited WITHOUT needing massive drag.
-        // A. Engine Acceleration (Thrust Falloff)
-        let base_thrust = 50.0 * aircraft.thrust; 
-        
-        // Let the "wall" move dynamically based on your throttle
-        let max_effective_ratio = aircraft.throttle + 0.2; 
-        let high_speed_falloff = (max_effective_ratio - airspeed_ratio).clamp(0.0, 1.0); 
-        
-        let engine_acceleration = aircraft.throttle * base_thrust * high_speed_falloff;
-        
-        // B. Lift & Gravity Physics
-        // Gravity always acts along flight path (negative climb = gain speed)
-        let gravity_acceleration = -climb_angle * aircraft.gravity;
-        
-        // Lift reduces effective gravity when flying level
-        let lift_efficiency = (1.0 - climb_angle.abs()).max(0.3);
-        let lift_reduction = aircraft.lift_coefficient * dynamic_pressure * lift_efficiency * aircraft.lift_reduction_factor;
-        let effective_gravity_accel = gravity_acceleration.abs() - lift_reduction;
-        let gravity_acceleration = gravity_acceleration.signum() * effective_gravity_accel.max(0.0);
-
-        // C. Turn Drag (G-forces from maneuvers)
-        let centripetal_accel = aircraft.speed * aircraft.pitch_velocity.abs();
-        let g_force = centripetal_accel / 9.8;
-        let turn_drag = g_force * aircraft.g_force_drag;
-
-        // D. Wind Force (headwind/tailwind effect)
-        let wind_dot = forward.dot(wind.base_wind.normalize_or_zero());
-        let wind_acceleration = wind_dot * wind.base_wind.length() * 0.3;
-
-        // E. Parasitic drag (increases with speed²)
-        // Because the engine naturally limits top speed, drag can be kept purely aerodynamic.
-        // This gives you that smooth, realistic gliding feeling when you cut the throttle!
-        let parasitic_drag = dynamic_pressure * aircraft.parasitic_drag_coef;
-
-        // Apply all accelerations
-        aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag - parasitic_drag + wind_acceleration) * dt;
-        aircraft.speed = aircraft.speed.max(0.0);
-
-        // 2. AERODYNAMICS
-        let control_effectiveness = get_control_effectiveness(airspeed_ratio);
-
-        let pitch_strength = aircraft.pitch_strength * control_effectiveness;
-        let roll_strength = aircraft.roll_strength * control_effectiveness;
-        let yaw_strength = aircraft.yaw_strength * control_effectiveness;
-        let rotational_damping = 2.0;
-
-        // --- INPUTS (Only in Aircraft mode) ---
-        if control_mode.mode == FlightMode::Aircraft {
-            let mut is_rolling = false;
-            let mut is_pitching = false;
-
-            if keyboard.pressed(KeyCode::KeyW) { 
-                aircraft.pitch_velocity -= pitch_strength * dt;
-                is_pitching = true;
+            // 1. ENGINE & DRAG
+            if keyboard.pressed(KeyCode::Equal) {
+                aircraft.throttle = (aircraft.throttle + 0.5 * dt).min(aircraft.max_throttle);
             }
-            if keyboard.pressed(KeyCode::KeyS) { 
-                aircraft.pitch_velocity += pitch_strength * dt;
-                is_pitching = true;
+            if keyboard.pressed(KeyCode::Minus) {
+                aircraft.throttle = (aircraft.throttle - 0.5 * dt).max(0.0);
             }
+
+            let forward = plane_transform.forward().as_vec3();
+            let climb_angle = forward.y;
             
-            if keyboard.pressed(KeyCode::KeyA) { 
-                aircraft.roll_velocity += roll_strength * dt; 
-                is_rolling = true;
-            }
-            if keyboard.pressed(KeyCode::KeyD) { 
-                aircraft.roll_velocity -= roll_strength * dt; 
-                is_rolling = true;
-            }
+            let airspeed_ratio = aircraft.speed / aircraft.max_speed;
+            let dynamic_pressure = airspeed_ratio.powi(2);
+
+            // A. Engine Acceleration (Thrust Falloff)
+            let base_thrust = 50.0 * aircraft.thrust; 
+            let max_effective_ratio = aircraft.throttle + 0.2; 
+            let high_speed_falloff = (max_effective_ratio - airspeed_ratio).clamp(0.0, 1.0); 
+            let engine_acceleration = aircraft.throttle * base_thrust * high_speed_falloff;
             
-            if keyboard.pressed(KeyCode::KeyQ) { aircraft.yaw_velocity += yaw_strength * dt; }
-            if keyboard.pressed(KeyCode::KeyE) { aircraft.yaw_velocity -= yaw_strength * dt; }
+            // B. Lift & Gravity Physics
+            let gravity_acceleration = -climb_angle * aircraft.gravity;
+            let lift_efficiency = (1.0 - climb_angle.abs()).max(0.3);
+            let lift_reduction = aircraft.lift_coefficient * dynamic_pressure * lift_efficiency * aircraft.lift_reduction_factor;
+            let effective_gravity_accel = gravity_acceleration.abs() - lift_reduction;
+            let gravity_acceleration = gravity_acceleration.signum() * effective_gravity_accel.max(0.0);
 
-            // --- STABILITY & AUTO-CORRECTION ---
-            let bank_angle = plane_transform.right().y;
-            let pitch_angle = plane_transform.forward().y;
+            // C. Turn Drag (G-forces from maneuvers)
+            let centripetal_accel = aircraft.speed * aircraft.pitch_velocity.abs();
+            let g_force = centripetal_accel / 9.8;
+            let turn_drag = g_force * aircraft.g_force_drag;
+
+            // D. Wind Force (Macro Wind Intensity & Direction via Perlin Noise)
             
-            aircraft.yaw_velocity += bank_angle * aircraft.bank_turn_strength * control_effectiveness * dt;
+            // Recombine direction and speed to get the base velocity for drift calculation
+            let base_wind_velocity = wind.wind_direction * wind.wind_speed;
+            let wind_drift = base_wind_velocity * t as f32;
+            
+            let sample_x = (pos.x - wind_drift.x) as f64 * wind.macro_wind_freq;
+            let sample_z = (pos.z - wind_drift.z) as f64 * wind.macro_wind_freq;
+            let weather_evolution = t * (wind.macro_wind_freq * wind.weather_evolution_rate); 
+            
+            // 1. Intensity Noise (Unchanged)
+            let wind_intensity_noise = wind.perlin.get([
+                sample_x, 
+                weather_evolution, 
+                sample_z
+            ]) as f32;
+            let wind_multiplier = (wind_intensity_noise * 0.8) + 1.0; 
 
-            if !is_rolling {
-                let auto_level_force = -bank_angle * aircraft.auto_level_strength * control_effectiveness;
-                aircraft.roll_velocity += auto_level_force * dt;
+            // 2. Direction Noise (Unchanged)
+            let wind_dir_noise = wind.perlin.get([
+                sample_x + 1000.0, 
+                weather_evolution + 1000.0, 
+                sample_z + 1000.0
+            ]) as f32;
+            let angle_shift = wind_dir_noise * wind.max_angle_shift;
+            
+            // 3. Apply changes cleanly
+            // Rotate the normalized direction, NOT the speed
+            let wind_rotation = Quat::from_rotation_y(angle_shift);
+            let current_wind_dir = wind_rotation * wind.wind_direction;
+            
+            // Current wind speed is base speed * noise multiplier
+            let current_speed = wind.wind_speed * wind_multiplier;
+
+            // Final Wind Vector to push the plane sideways
+            let current_wind = current_wind_dir * current_speed;
+
+            // Apply forward acceleration
+            // Because current_wind_dir is already normalized, we skip the costly .normalize_or_zero() call!
+            let wind_dot = forward.dot(current_wind_dir);
+            
+            // We can also skip .length() and just use current_speed directly
+            let wind_acceleration = wind_dot * current_speed * 0.3;
+
+            // E. Parasitic drag
+            let parasitic_drag = dynamic_pressure * aircraft.parasitic_drag_coef;
+
+            // Apply all accelerations
+            aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag - parasitic_drag + wind_acceleration) * dt;
+            aircraft.speed = aircraft.speed.max(0.0);
+
+            // 2. AERODYNAMICS
+            let control_effectiveness = get_control_effectiveness(airspeed_ratio);
+
+            let pitch_strength = aircraft.pitch_strength * control_effectiveness;
+            let roll_strength = aircraft.roll_strength * control_effectiveness;
+            let yaw_strength = aircraft.yaw_strength * control_effectiveness;
+            let rotational_damping = 2.0;
+
+            // --- INPUTS (Only in Aircraft mode) ---
+            if control_mode.mode == FlightMode::Aircraft {
+                let mut is_rolling = false;
+                let mut is_pitching = false;
+
+                if keyboard.pressed(KeyCode::KeyW) { 
+                    aircraft.pitch_velocity -= pitch_strength * dt;
+                    is_pitching = true;
+                }
+                if keyboard.pressed(KeyCode::KeyS) { 
+                    aircraft.pitch_velocity += pitch_strength * dt;
+                    is_pitching = true;
+                }
+                
+                if keyboard.pressed(KeyCode::KeyA) { 
+                    aircraft.roll_velocity += roll_strength * dt; 
+                    is_rolling = true;
+                }
+                if keyboard.pressed(KeyCode::KeyD) { 
+                    aircraft.roll_velocity -= roll_strength * dt; 
+                    is_rolling = true;
+                }
+                
+                if keyboard.pressed(KeyCode::KeyQ) { aircraft.yaw_velocity += yaw_strength * dt; }
+                if keyboard.pressed(KeyCode::KeyE) { aircraft.yaw_velocity -= yaw_strength * dt; }
+
+                // --- STABILITY & AUTO-CORRECTION ---
+                let bank_angle = plane_transform.right().y;
+                let pitch_angle = plane_transform.forward().y;
+                
+                aircraft.yaw_velocity += bank_angle * aircraft.bank_turn_strength * control_effectiveness * dt;
+
+                if !is_rolling {
+                    let auto_level_force = -bank_angle * aircraft.auto_level_strength * control_effectiveness;
+                    aircraft.roll_velocity += auto_level_force * dt;
+                }
+
+                if !is_pitching {
+                    let auto_level_force = -pitch_angle * aircraft.auto_level_strength * control_effectiveness;
+                    aircraft.pitch_velocity += auto_level_force / 1.25 * dt;
+                }
             }
 
-            if !is_pitching {
-                let auto_level_force = -pitch_angle * aircraft.auto_level_strength * control_effectiveness;
-                aircraft.pitch_velocity += auto_level_force / 1.25 * dt;
+            // --- STALL BEHAVIOR (Always applies) ---
+            let stall_strength = (1.0 - airspeed_ratio).max(0.0);
+            let stall_pitch_down = stall_strength * match plane_transform.up().y.is_sign_negative() {
+                true => -1.0,
+                false => 1.0,
+            };
+            if aircraft.speed < aircraft.max_speed * 0.33 {
+                aircraft.pitch_velocity -= stall_pitch_down * dt;
             }
-        }
 
-        // --- STALL BEHAVIOR (Always applies) ---
-        let stall_strength = (1.0 - airspeed_ratio).max(0.0);
-        let stall_pitch_down = stall_strength * match plane_transform.up().y.is_sign_negative() {
-            true => -1.0,
-            false => 1.0,
-        };
-        if aircraft.speed < aircraft.max_speed * 0.33 {
-            aircraft.pitch_velocity -= stall_pitch_down * dt;
-        }
+            // --- WIND TURBULENCE (Perlin noise-based) ---
+            let freq = wind.turbulence_frequency as f64;
+            
+            // Add wind drift to turbulence sampling as well so gusts travel with the wind!
+            let turb_sample_x = pos.x as f64 - wind_drift.x as f64;
+            let turb_sample_z = pos.z as f64 - wind_drift.z as f64;
 
-        // --- WIND TURBULENCE (Perlin noise-based) ---
-        let pos = plane_transform.translation;
-        let t = time.elapsed_secs_f64() as f64;
-        let freq = wind.turbulence_frequency as f64;
-        
-        let turbulence_pitch = wind.perlin.get([pos.x as f64 * freq, pos.z as f64 * freq, t * freq]) as f32;
-        let turbulence_roll = wind.perlin.get([pos.z as f64 * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32 / 1.5;
-        let turbulence_yaw = wind.perlin.get([pos.y as f64 * freq, pos.x as f64 * freq, t * freq + 200.0]) as f32 / 1.35;
-        
-        let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(6.0);
-        aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
-        aircraft.roll_velocity += turbulence_roll * turbulence_scale * dt;
-        aircraft.yaw_velocity += turbulence_yaw * turbulence_scale * dt;
+            let turbulence_pitch = wind.perlin.get([turb_sample_x * freq, turb_sample_z * freq, t * freq]) as f32;
+            let turbulence_roll = wind.perlin.get([turb_sample_z * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32 / 1.5;
+            let turbulence_yaw = wind.perlin.get([pos.y as f64 * freq, turb_sample_x * freq, t * freq + 200.0]) as f32 / 1.35;
+            
+            let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(6.0);
+            aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
+            aircraft.roll_velocity += turbulence_roll * turbulence_scale * dt;
+            aircraft.yaw_velocity += turbulence_yaw * turbulence_scale * dt;
 
-        let gust_freq = freq * 0.0005;
-        let turbulence_velocity_x = wind.perlin.get([pos.x as f64 * gust_freq, t * gust_freq, pos.z as f64 * gust_freq + 300.0]) as f32;
-        let turbulence_velocity_y = wind.perlin.get([pos.y as f64 * gust_freq, t * gust_freq, pos.x as f64 * gust_freq + 400.0]) as f32;
-        let turbulence_velocity_z = wind.perlin.get([pos.z as f64 * gust_freq, t * gust_freq, pos.y as f64 * gust_freq + 500.0]) as f32;
-        
-        let turbulence_force = Vec3::new(turbulence_velocity_x, turbulence_velocity_y, turbulence_velocity_z);
-        let turbulence_velocity_scale = wind.turbulence_intensity * 100.0 * (airspeed_ratio + 0.5).powf(1.5);
+            let gust_freq = freq * wind.gust_frequency_multiplier;
+            let turbulence_velocity_x = wind.perlin.get([turb_sample_x * gust_freq, t * gust_freq, turb_sample_z * gust_freq + 300.0]) as f32;
+            let turbulence_velocity_y = wind.perlin.get([pos.y as f64 * gust_freq, t * gust_freq, turb_sample_x * gust_freq + 400.0]) as f32;
+            let turbulence_velocity_z = wind.perlin.get([turb_sample_z * gust_freq, t * gust_freq, pos.y as f64 * gust_freq + 500.0]) as f32;
+            
+            let turbulence_force = Vec3::new(turbulence_velocity_x, turbulence_velocity_y, turbulence_velocity_z);
+            let turbulence_velocity_scale = wind.turbulence_intensity * 100.0 * (airspeed_ratio + 0.5).powf(1.5);
 
-        // --- DAMPING & MOVEMENT (Always applies) ---
-        aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
-        aircraft.roll_velocity -= aircraft.roll_velocity * rotational_damping * dt;
-        aircraft.yaw_velocity -= aircraft.yaw_velocity * rotational_damping * dt;
+            // --- DAMPING & MOVEMENT (Always applies) ---
+            aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
+            aircraft.roll_velocity -= aircraft.roll_velocity * rotational_damping * dt;
+            aircraft.yaw_velocity -= aircraft.yaw_velocity * rotational_damping * dt;
 
-        // Apply Rotation
-        plane_transform.rotate_local_x(aircraft.pitch_velocity * dt);
-        plane_transform.rotate_local_z(aircraft.roll_velocity * dt);
-        plane_transform.rotate_local_y(aircraft.yaw_velocity * dt);
+            // Apply Rotation
+            plane_transform.rotate_local_x(aircraft.pitch_velocity * dt);
+            plane_transform.rotate_local_z(aircraft.roll_velocity * dt);
+            plane_transform.rotate_local_y(aircraft.yaw_velocity * dt);
 
-        // Apply Lift vs Gravity (Vertical position)
-        let lift_threshold = 150.0;
-        let gravity_strength = 30.0;
-        let gravity_factor = (1.0 - (aircraft.speed / lift_threshold)).max(0.0);
-        
-        let mut movement = forward * aircraft.speed;
-        movement.y -= gravity_strength * gravity_factor;
-        
-        movement += wind.base_wind * 0.5;
-        movement += turbulence_force * turbulence_velocity_scale;
+            // Apply Lift vs Gravity (Vertical position)
+            let lift_threshold = 150.0;
+            let gravity_strength = 30.0;
+            let gravity_factor = (1.0 - (aircraft.speed / lift_threshold)).max(0.0);
+            
+            let mut movement = forward * aircraft.speed;
+            movement.y -= gravity_strength * gravity_factor;
+            
+            // Apply the noisy current_wind instead of the static base_wind
+            movement += current_wind * 0.5; 
+            movement += turbulence_force * turbulence_velocity_scale;
 
-        plane_transform.translation += movement * dt;
+            aircraft.velocity = movement;
+
+            plane_transform.translation += movement * dt;
         }
     }
 
@@ -347,7 +408,14 @@ pub fn camera_follow_aircraft(
     let Ok((plane_transform, aircraft)) = aircraft_query.single() else { return; };
     let Ok(mut camera_transform) = camera_query.single_mut() else { return; };
 
-    let plane_movement = plane_transform.forward().as_vec3() * aircraft.speed * time.delta_secs();
+    // Determine actual travel direction. Fall back to forward vector if stopped.
+    let mut actual_direction = aircraft.velocity.normalize_or_zero();
+    if actual_direction == Vec3::ZERO {
+        actual_direction = plane_transform.forward().into();
+    }
+
+    // Move camera with the exact velocity rather than purely forward speed
+    let plane_movement = aircraft.velocity * time.delta_secs();
     camera_transform.translation += plane_movement;
 
     let base_distance = 18.0;
@@ -362,13 +430,15 @@ pub fn camera_follow_aircraft(
     let smoothness = 2.0 + (speed_ratio * 1.5);
     let t = (time.delta_secs() * smoothness).min(1.0);
 
+    // Position behind the *movement* direction, not the local back
     let target_position = plane_transform.translation 
-        + (plane_transform.back() * dynamic_distance) 
+        + (-actual_direction * dynamic_distance) 
         + (plane_transform.up() * height);
     
     camera_transform.translation = camera_transform.translation.lerp(target_position, t);
 
-    let look_target = plane_transform.translation + (plane_transform.forward() * look_ahead_distance);
+    // Look along the *movement* direction
+    let look_target = plane_transform.translation + (actual_direction * look_ahead_distance);
     let target_rotation = camera_transform.looking_at(look_target, plane_transform.up()).rotation;
     camera_transform.rotation = camera_transform.rotation.slerp(target_rotation, t);
 }
