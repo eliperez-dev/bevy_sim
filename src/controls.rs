@@ -82,7 +82,7 @@ impl Default for Aircraft {
             max_throttle: 1.5,
             thrust: 1.5,
             gravity: 80.0,       
-            g_force_drag: 0.4,
+            g_force_drag: 1.2,
             lift_coefficient: 2.5,
             lift_reduction_factor: 30.0,
             parasitic_drag_coef: 5.0,
@@ -135,7 +135,7 @@ impl Default for Wind {
             
             turbulence_intensity: 0.008,
             turbulence_frequency: 4.0,
-            gust_frequency_multiplier: 0.0005,
+            gust_frequency_multiplier: 0.00075,
             
             perlin: Perlin::new(42),
         }
@@ -144,7 +144,7 @@ impl Default for Wind {
 
 pub fn get_control_effectiveness(airspeed_ratio: f32) -> f32 {
     if airspeed_ratio > 1.0 {
-        (1.0 / (airspeed_ratio.powf(3.0))).clamp(0.3, 1.0)
+        1.0
     } else {
         (1.0 - ( 1.0 - airspeed_ratio).powf(3.0)).clamp(0.0, 1.0)
     }
@@ -207,15 +207,25 @@ pub fn camera_controls(
             
             // B. Lift & Gravity Physics
             let gravity_acceleration = -climb_angle * aircraft.gravity;
+            
             let lift_efficiency = (1.0 - climb_angle.abs()).max(0.3);
-            let lift_reduction = aircraft.lift_coefficient * dynamic_pressure * lift_efficiency * aircraft.lift_reduction_factor;
-            let effective_gravity_accel = gravity_acceleration.abs() - lift_reduction;
-            let gravity_acceleration = gravity_acceleration.signum() * effective_gravity_accel.max(0.0);
+            let lift_force = aircraft.lift_coefficient * dynamic_pressure * lift_efficiency * aircraft.lift_reduction_factor;
+            
+            let final_gravity_accel = if climb_angle > 0.0 {
+                let lift_reduction = lift_force * 0.5;
+                let effective_gravity_accel = gravity_acceleration.abs() - lift_reduction;
+                -effective_gravity_accel.max(0.0)
+            } else {
+                let lift_reduction = lift_force * 0.2;
+                let effective_gravity_accel = gravity_acceleration.abs() - lift_reduction;
+                effective_gravity_accel.max(0.0)
+            };
+            let gravity_acceleration = final_gravity_accel;
 
             // C. Turn Drag (G-forces from maneuvers)
             let centripetal_accel = aircraft.speed * aircraft.pitch_velocity.abs();
             let g_force = centripetal_accel / 9.8;
-            let turn_drag = g_force * aircraft.g_force_drag;
+            let turn_drag = g_force * aircraft.g_force_drag * dynamic_pressure;
 
             // D. Wind Force (Macro Wind Intensity & Direction via Perlin Noise)
             
@@ -262,7 +272,8 @@ pub fn camera_controls(
             let wind_acceleration = wind_dot * current_speed * 0.3;
 
             // E. Parasitic drag
-            let parasitic_drag = dynamic_pressure * aircraft.parasitic_drag_coef;
+            let high_speed_multiplier = 1.0 + (airspeed_ratio.max(1.0) - 1.0) * 0.5;
+            let parasitic_drag = dynamic_pressure * aircraft.parasitic_drag_coef * high_speed_multiplier;
 
             // Apply all accelerations
             aircraft.speed += (engine_acceleration + gravity_acceleration - turn_drag - parasitic_drag + wind_acceleration) * dt;
@@ -338,10 +349,11 @@ pub fn camera_controls(
             let turb_sample_z = pos.z as f64 - wind_drift.z as f64;
 
             let turbulence_pitch = wind.perlin.get([turb_sample_x * freq, turb_sample_z * freq, t * freq]) as f32;
-            let turbulence_roll = wind.perlin.get([turb_sample_z * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32 / 1.5;
-            let turbulence_yaw = wind.perlin.get([pos.y as f64 * freq, turb_sample_x * freq, t * freq + 200.0]) as f32 / 1.35;
+            let turbulence_roll = wind.perlin.get([turb_sample_z * freq, pos.y as f64 * freq, t * freq + 100.0]) as f32 ;
+            let turbulence_yaw = wind.perlin.get([pos.y as f64 * freq, turb_sample_x * freq, t * freq + 200.0]) as f32;
             
-            let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(6.0);
+            let turbulance_pow = 5.5;
+            let turbulence_scale = wind.turbulence_intensity * (airspeed_ratio + 1.0).powf(turbulance_pow);
             aircraft.pitch_velocity += turbulence_pitch * turbulence_scale * dt;
             aircraft.roll_velocity += turbulence_roll * turbulence_scale * dt;
             aircraft.yaw_velocity += turbulence_yaw * turbulence_scale * dt;
@@ -352,7 +364,7 @@ pub fn camera_controls(
             let turbulence_velocity_z = wind.perlin.get([turb_sample_z * gust_freq, t * gust_freq, pos.y as f64 * gust_freq + 500.0]) as f32;
             
             let turbulence_force = Vec3::new(turbulence_velocity_x, turbulence_velocity_y, turbulence_velocity_z);
-            let turbulence_velocity_scale = wind.turbulence_intensity * 100.0 * (airspeed_ratio + 0.5).powf(1.5);
+            let turbulence_velocity_scale = wind.turbulence_intensity * 85.0 * (airspeed_ratio + 0.5).powf(turbulance_pow);
 
             // --- DAMPING & MOVEMENT (Always applies) ---
             aircraft.pitch_velocity -= aircraft.pitch_velocity * rotational_damping * dt;
@@ -470,24 +482,27 @@ pub fn camera_follow_aircraft(
 
             if keyboard.pressed(KeyCode::ArrowLeft) { main_camera.orbit_yaw -= orbit_speed * time.delta_secs(); }
             if keyboard.pressed(KeyCode::ArrowRight) { main_camera.orbit_yaw += orbit_speed * time.delta_secs(); }
-            if keyboard.pressed(KeyCode::ArrowUp) { main_camera.orbit_pitch -= orbit_speed * time.delta_secs(); }
-            if keyboard.pressed(KeyCode::ArrowDown) { main_camera.orbit_pitch += orbit_speed * time.delta_secs(); }
+            if keyboard.pressed(KeyCode::ArrowDown) { main_camera.orbit_pitch -= orbit_speed * time.delta_secs(); }
+            if keyboard.pressed(KeyCode::ArrowUp) { main_camera.orbit_pitch += orbit_speed * time.delta_secs(); }
 
             // Clamp to prevent flipping upside down
             main_camera.orbit_pitch = main_camera.orbit_pitch.clamp(-0.4, 1.2);
 
-            // Calculate Orbit Position
-            let orbit_rotation = Quat::from_axis_angle(plane_transform.up().into(), main_camera.orbit_yaw) 
-                               * Quat::from_axis_angle(plane_transform.right().into(), main_camera.orbit_pitch);
+            // Calculate Orbit Position using world-space axes (not affected by plane rotation)
+            let world_up = Vec3::Y;
+            let world_right = Vec3::X;
+            
+            let orbit_rotation = Quat::from_axis_angle(world_up, main_camera.orbit_yaw) 
+                               * Quat::from_axis_angle(world_right, main_camera.orbit_pitch);
 
-            let base_offset = (-actual_direction * dynamic_distance) + (plane_transform.up() * height);
+            let base_offset = Vec3::new(0.0, height * 1.5, -dynamic_distance * 1.5);
             let rotated_offset = orbit_rotation * base_offset;
 
             let target_position = plane_transform.translation + rotated_offset;
             camera_transform.translation = camera_transform.translation.lerp(target_position, t);
 
             // Look directly at the plane
-            let target_rotation = camera_transform.looking_at(plane_transform.translation, plane_transform.up()).rotation;
+            let target_rotation = camera_transform.looking_at(plane_transform.translation, world_up).rotation;
             camera_transform.rotation = target_rotation;
         }
         FlightMode::Aircraft => {
