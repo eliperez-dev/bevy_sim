@@ -248,6 +248,33 @@ fn setup_camera_fog(mut commands: Commands) {
     ));
 }
 
+fn map_temperature(t: f32) -> (f32, f32) {
+    // Clamp t between 0.0 and 1.0 to prevent out-of-range results
+    let t = t.clamp(0.0, 1.0);
+
+    // Map 0.0..1.0 to 0.0..100.0 Fahrenheit
+    let fahrenheit = t * 100.0 + 10.0;
+
+    // Convert Fahrenheit to Celsius
+    let celsius = (fahrenheit - 32.0) * (5.0 / 9.0);
+
+    ((fahrenheit * 10.0) .round() / 10.0, (celsius * 10.0).round() / 10.0)
+}
+
+fn format_game_time(t: f32) -> String {
+    let total_hours = (t * 24.0 - 4.0) % 24.0;
+
+    let hours = total_hours.floor() as u32;
+    let minutes = ((total_hours - hours as f32) * 60.0).round() as u32;
+
+    // Handle the edge case where rounding minutes to 60 should increment the hour
+    if minutes == 60 {
+        format!("{:02}:00", (hours + 1) % 24)
+    } else {
+        format!("{:02}:{:02}", hours, minutes)
+    }
+}
+
 #[derive(Component)]
 struct Debugger;
 
@@ -284,14 +311,14 @@ fn update_debugger(
     message.clear();
 
     message.push_str(&format!("FPS: {:.0}\n", *cached_fps));
-    message.push_str(&format!("Mode: {:?} (Press F to toggle)\n", control_mode.mode));
-    message.push_str(&format!("Position: [{:.0}, {:.0}, {:.0}]\n", cam_trans.x, cam_trans.y, cam_trans.z));
-    message.push_str(&format!("Biome: {:?} | Climate: {:?}\n", biome, climate));
-    message.push_str(&format!("Chunks: {} | Time: {:.2}\n", chunks.spawned_chunks.len(), cycle.time_of_day));
+    message.push_str(&format!("Position: [{:.0}, {:.0}, {:.0}]\n", cam_trans.x.round(), cam_trans.y.round(), cam_trans.z.round()));
+    message.push_str(&format!("Biome: {:?} | Tempature: {:?}F / {:?}C\n", biome, map_temperature(climate.0).0, map_temperature(climate.0).1));
+    message.push_str(&format!("Chunks: {} | Time: {}\n", chunks.spawned_chunks.len(), format_game_time(cycle.time_of_day)));
 
 
     // --- CONTROLS ---
     message.push_str("\n--- CONTROLS ---\n");
+    message.push_str(&format!("Camera Mode: {:?} (Press F to toggle)\n", control_mode.mode));
     message.push_str("T: Toggle Wireframe\n");
     
     match control_mode.mode {
@@ -315,7 +342,6 @@ fn update_debugger(
             message.push_str("A / D: Roll (Turn)\n");
             message.push_str("Q / E: Yaw (Rudder)\n");
             message.push_str("= / -: Throttle Up/Down\n");
-            message.push_str("(Camera Auto-Chases)\n");
         }
     }
 }
