@@ -109,6 +109,7 @@ fn main() {
         .add_observer(network::despawn_remote_player)
         .add_observer(network::cleanup_on_disconnect)
         .add_observer(network::teleport_to_player)
+        .add_observer(network::respawn_aircraft)
         .add_systems(Startup, setup_camera_system)
         .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
         .add_systems(Startup, (setup, setup_camera_fog, spawn_stars, hud::auto_connect_on_startup).chain())
@@ -122,6 +123,7 @@ fn main() {
             update_chunk_lod, 
             update_daylight_cycle,
             draw_lod_rings,
+            network::check_connection_status,
             network::send_player_updates,
             network::receive_server_messages,
             network::lerp_remote_players,
@@ -490,6 +492,8 @@ pub fn debugger_ui(
     mut commands: Commands,
     mut menu: ResMut<hud::MultiplayerMenu>,
     mut smoothing_settings: ResMut<network::NetworkSmoothingSettings>,
+    mut world_generator: ResMut<WorldGenerator>,
+    chunks: Query<(Entity, &Chunk)>,
 ) -> Result<(), > { 
     egui::Window::new("Settings")
     .default_pos(egui::Pos2::new(20.0, 20.0))
@@ -523,10 +527,10 @@ pub fn debugger_ui(
                         chunk_manager.render_distance = 80;
                         render_settings.just_updated = true;
                         render_settings.cascades = 2;
-                        chunk_manager.lod_distance_multiplier = 14.0;
+                        chunk_manager.lod_distance_multiplier = 15.0;
                         if let Ok(mut fog) = fog_query.single_mut() {
                             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
-                                *density = 0.000025;
+                                *density = 0.000024;
                             }
                         }
                     }
@@ -590,9 +594,26 @@ pub fn debugger_ui(
                         ui.separator();
                         
                         if ui.button("Disconnect").clicked() {
+                            let original_seed = client.original_seed;
                             client.disconnect();
                             commands.remove_resource::<network::NetworkClient>();
+                            
+                            *world_generator = WorldGenerator::new(original_seed);
+                            
+                            for (entity, chunk) in chunks.iter() {
+                                if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                                    entity_commands.despawn();
+                                    chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                                }
+                            }
+                            
+                            chunk_manager.last_camera_chunk = None;
+                            chunk_manager.to_spawn.clear();
+                            chunk_manager.lod_to_update.clear();
+                            render_settings.just_updated = true;
+                            
                             commands.trigger(network::DisconnectCleanup);
+                            commands.trigger(network::RespawnAircraft);
                             menu.connection_status = "Disconnected".to_string();
                         }
                     } else {
@@ -730,9 +751,26 @@ pub fn debugger_ui(
                             ui.separator();
                             
                             if ui.button("Disconnect").clicked() {
+                                let original_seed = client.original_seed;
                                 client.disconnect();
                                 commands.remove_resource::<network::NetworkClient>();
+                                
+                                *world_generator = WorldGenerator::new(original_seed);
+                                
+                                for (entity, chunk) in chunks.iter() {
+                                    if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                                        entity_commands.despawn();
+                                        chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                                    }
+                                }
+                                
+                                chunk_manager.last_camera_chunk = None;
+                                chunk_manager.to_spawn.clear();
+                                chunk_manager.lod_to_update.clear();
+                                render_settings.just_updated = true;
+                                
                                 commands.trigger(network::DisconnectCleanup);
+                                commands.trigger(network::RespawnAircraft);
                                 menu.connection_status = "Disconnected".to_string();
                             }
                         } else {

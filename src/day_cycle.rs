@@ -128,7 +128,7 @@ pub fn spawn_stars(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let num_stars = 500;
+    let num_stars = 1000;
 
     for _ in 0..num_stars {
         let phi = rand::random::<f32>() * std::f32::consts::TAU;

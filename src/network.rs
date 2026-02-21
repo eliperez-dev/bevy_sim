@@ -60,8 +60,10 @@ pub struct NetworkClient {
     pub player_id: Option<u32>,
     pub connected: bool,
     pub world_seed: Option<u32>,
+    pub original_seed: u32,
     send_tx: mpsc::UnboundedSender<ClientMessage>,
     recv_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<ServerMessage>>>,
+    disconnect_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<()>>>,
 }
 
 impl NetworkClient {
@@ -91,13 +93,16 @@ pub async fn connect_to_server(address: &str) -> Result<NetworkClient, String> {
 
     let (send_tx, mut send_rx) = mpsc::unbounded_channel::<ClientMessage>();
     let (recv_tx, recv_rx) = mpsc::unbounded_channel::<ServerMessage>();
+    let (disconnect_tx, disconnect_rx) = mpsc::unbounded_channel::<()>();
 
+    let disconnect_tx_write = disconnect_tx.clone();
     TOKIO_RUNTIME.spawn(async move {
         let mut write_half = write_half;
         while let Some(message) = send_rx.recv().await {
             //println!("Client sending message: {:?}", message);
             if let Err(e) = send_message(&mut write_half, &message).await {
                 eprintln!("Failed to send message: {}", e);
+                let _ = disconnect_tx_write.send(());
                 break;
             }
         }
@@ -118,10 +123,12 @@ pub async fn connect_to_server(address: &str) -> Result<NetworkClient, String> {
                 }
                 Ok(None) => {
                     println!("Server disconnected");
+                    let _ = disconnect_tx.send(());
                     break;
                 }
                 Err(e) => {
                     eprintln!("Error receiving message: {}", e);
+                    let _ = disconnect_tx.send(());
                     break;
                 }
             }
@@ -133,8 +140,10 @@ pub async fn connect_to_server(address: &str) -> Result<NetworkClient, String> {
         player_id: None,
         connected: true,
         world_seed: None,
+        original_seed: 0,
         send_tx,
         recv_rx: Arc::new(tokio::sync::Mutex::new(recv_rx)),
+        disconnect_rx: Arc::new(tokio::sync::Mutex::new(disconnect_rx)),
     })
 }
 
@@ -206,6 +215,52 @@ pub fn send_player_updates(
     }
 }
 
+pub fn check_connection_status(
+    client: Option<ResMut<NetworkClient>>,
+    mut commands: Commands,
+    mut world_generator: ResMut<crate::world_generation::WorldGenerator>,
+    mut chunk_manager: ResMut<crate::world_generation::ChunkManager>,
+    chunks: Query<(Entity, &crate::world_generation::Chunk)>,
+    mut render_settings: ResMut<crate::RenderSettings>,
+) {
+    let Some(mut client) = client else { return };
+    if !client.connected {
+        return;
+    }
+
+    let disconnected = TOKIO_RUNTIME.block_on(async {
+        let mut disconnect_rx = client.disconnect_rx.lock().await;
+        disconnect_rx.try_recv().is_ok()
+    });
+
+    if disconnected {
+        println!("🔌 Server connection lost, triggering cleanup");
+        client.connected = false;
+        client.player_id = None;
+        client.world_seed = None;
+        
+        let original_seed = client.original_seed;
+        println!("🔄 Restoring original world seed {}", original_seed);
+        
+        *world_generator = crate::world_generation::WorldGenerator::new(original_seed);
+        
+        for (entity, chunk) in chunks.iter() {
+            if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                entity_commands.despawn();
+                chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+            }
+        }
+        
+        chunk_manager.last_camera_chunk = None;
+        chunk_manager.to_spawn.clear();
+        chunk_manager.lod_to_update.clear();
+        render_settings.just_updated = true;
+        
+        commands.trigger(DisconnectCleanup);
+        commands.trigger(RespawnAircraft);
+    }
+}
+
 pub fn receive_server_messages(
     client: Option<ResMut<NetworkClient>>,
     mut commands: Commands,
@@ -252,6 +307,9 @@ pub fn receive_server_messages(
                         // Force chunk regeneration
                         render_settings.just_updated = true;
                         
+                        // Respawn aircraft at spawn position
+                        commands.trigger(RespawnAircraft);
+                        
                         for player in existing_players {
                             println!("Player {} already in game", player.id);
                             commands.trigger(SpawnRemotePlayer(player));
@@ -291,6 +349,9 @@ pub struct DespawnRemotePlayer(pub u32);
 
 #[derive(Event)]
 pub struct DisconnectCleanup;
+
+#[derive(Event)]
+pub struct RespawnAircraft;
 
 #[derive(Event)]
 pub struct TeleportToPlayer {
@@ -553,12 +614,54 @@ pub fn update_player_labels(
 pub fn teleport_to_player(
     trigger: On<TeleportToPlayer>,
     mut aircraft_query: Query<&mut Transform, With<crate::controls::Aircraft>>,
+    mut camera_query: Query<&mut Transform, (With<crate::controls::MainCamera>, Without<crate::controls::Aircraft>)>,
 ) {
     let event = &trigger;
     
     if let Ok(mut transform) = aircraft_query.single_mut() {
         transform.translation = Vec3::from(event.position);
         transform.rotation = Quat::from_array(event.rotation);
+        
+        if let Ok(mut camera_transform) = camera_query.single_mut() {
+            camera_transform.translation = transform.translation + Vec3::new(0.0, 9.0, 0.0);
+            camera_transform.rotation = camera_transform.looking_at(transform.translation, Vec3::Y).rotation;
+        }
+        
         println!("Teleported to Player {}", event.player_id);
+    }
+}
+
+pub fn respawn_aircraft(
+    _trigger: On<RespawnAircraft>,
+    mut aircraft_query: Query<(&mut Transform, &mut crate::controls::Aircraft)>,
+    mut camera_query: Query<(&mut Transform, &mut crate::controls::MainCamera), Without<crate::controls::Aircraft>>,
+    world_gen: Res<crate::world_generation::WorldGenerator>,
+) {
+    if let Ok((mut transform, mut aircraft)) = aircraft_query.single_mut() {
+        let spawn_pos = [0.0, 0.0, 0.0];
+        let terrain_height = world_gen.get_terrain_height(&spawn_pos);
+        let spawn_height = (terrain_height + crate::consts::RESPAWN_HEIGHT).max(crate::consts::RESPAWN_HEIGHT * 2.0);
+        
+        transform.translation = Vec3::new(0.0, spawn_height, 0.0);
+        transform.rotation = Quat::IDENTITY;
+        
+        aircraft.crashed = false;
+        aircraft.speed = 150.0;
+        aircraft.throttle = 0.8;
+        aircraft.velocity = Vec3::ZERO;
+        aircraft.pitch_velocity = 0.0;
+        aircraft.roll_velocity = 0.0;
+        aircraft.yaw_velocity = 0.0;
+        
+        if let Ok((mut camera_transform, mut main_camera)) = camera_query.single_mut() {
+            main_camera.orbit_yaw = 0.0;
+            main_camera.orbit_pitch = 0.0;
+            
+            let camera_offset = Vec3::new(0.0, 9.0, main_camera.orbit_distance * 5.0);
+            camera_transform.translation = transform.translation + camera_offset;
+            camera_transform.rotation = camera_transform.looking_at(transform.translation, Vec3::Y).rotation;
+        }
+        
+        println!("Aircraft respawned at spawn position");
     }
 }

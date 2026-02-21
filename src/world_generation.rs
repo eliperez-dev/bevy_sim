@@ -80,6 +80,7 @@ pub enum Biome {
 
 #[derive(Resource, Clone)]
 pub struct WorldGenerator {
+    pub seed: u32,
     terrain_layers: Vec<PerlinLayer>,
     temperature_layer: PerlinLayer,
     humidity_layer: PerlinLayer,
@@ -88,6 +89,7 @@ pub struct WorldGenerator {
 impl WorldGenerator {
     pub fn new(seed: u32) -> Self {
         Self {
+            seed,
             terrain_layers: vec![
                 PerlinLayer::new(seed,       0.08 * TERRAIN_HORIZONTAL_SCALE, 4.5),    
                 PerlinLayer::new(seed,       0.20 * TERRAIN_HORIZONTAL_SCALE, 3.5),      

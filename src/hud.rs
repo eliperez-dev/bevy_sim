@@ -10,6 +10,7 @@ pub fn flight_hud_system(
     aircraft_query: Query<(&Transform, &Aircraft), (With<Aircraft>, Without<MainCamera>)>,
     camera_query: Query<&Transform, With<MainCamera>>,
     wind: Res<Wind>,
+    remote_players_query: Query<&Transform, With<network::RemotePlayer>>,
 ) {
     if control_mode.mode != FlightMode::Aircraft {
         return;
@@ -112,7 +113,22 @@ pub fn flight_hud_system(
                 ui.label("HEADING & WIND");
                 
                 let wind_heading = calculate_wind_heading(&wind);
-                draw_wind_compass(ui, heading, wind_heading, wind.wind_speed);
+                
+                let player_headings: Vec<f32> = remote_players_query.iter()
+                    .map(|player_transform| {
+                        let to_player = player_transform.translation - plane_transform.translation;
+                        let angle = f32::atan2(to_player.x, -to_player.z).to_degrees() + 90.0;
+                        if angle < 0.0 {
+                            360.0 + angle
+                        } else if angle >= 360.0 {
+                            angle - 360.0
+                        } else {
+                            angle
+                        }
+                    })
+                    .collect();
+                
+                draw_wind_compass(ui, heading, wind_heading, wind.wind_speed, &player_headings);
                 
                 ui.label(egui::RichText::new(format!("HDG: {:.0}°", heading))
                     .size(11.0));
@@ -172,7 +188,7 @@ fn calculate_wind_heading(wind: &Wind) -> f32 {
     }
 }
 
-fn draw_wind_compass(ui: &mut egui::Ui, aircraft_heading: f32, wind_heading: f32, wind_speed: f32) {
+fn draw_wind_compass(ui: &mut egui::Ui, aircraft_heading: f32, wind_heading: f32, wind_speed: f32, player_headings: &[f32]) {
     let (response, painter) = ui.allocate_painter(
         egui::Vec2::new(90.0, 90.0),
         egui::Sense::hover(),
@@ -226,6 +242,21 @@ fn draw_wind_compass(ui: &mut egui::Ui, aircraft_heading: f32, wind_heading: f32
         painter.line_segment(
             [p1, p2],
             egui::Stroke::new(1.0, egui::Color32::GRAY),
+        );
+    }
+    
+    for &player_heading in player_headings {
+        let relative_player_heading = player_heading - aircraft_heading;
+        let player_angle_rad = (relative_player_heading - 90.0).to_radians();
+        let player_pos = egui::Pos2::new(
+            center.x + radius * player_angle_rad.cos(),
+            center.y + radius * player_angle_rad.sin(),
+        );
+        
+        painter.circle_filled(
+            player_pos,
+            3.5,
+            egui::Color32::from_rgb(0, 255, 150),
         );
     }
     
@@ -775,6 +806,7 @@ pub fn auto_connect_on_startup(
 pub fn process_connection_results(
     mut menu: ResMut<MultiplayerMenu>,
     mut commands: Commands,
+    world_gen: Res<crate::world_generation::WorldGenerator>,
 ) {
     if let Some(rx) = &menu.connection_receiver {
         if let Ok(result) = rx.try_recv() {
@@ -782,8 +814,9 @@ pub fn process_connection_results(
             menu.connection_receiver = None;
             
             match result {
-                Ok(client) => {
+                Ok(mut client) => {
                     menu.connection_status = "Connected!".to_string();
+                    client.original_seed = world_gen.seed;
                     commands.insert_resource(client);
                 }
                 Err(e) => {
