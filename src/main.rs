@@ -17,6 +17,7 @@ use consts::*;
 use day_cycle::*;
 use controls::*;
 use hud::*;
+use environment::*;
 
 mod world_generation;
 mod consts;
@@ -24,6 +25,7 @@ mod day_cycle;
 mod controls;
 mod hud;
 mod network;
+mod environment;
 
 // Temperature conversion constants
 const TEMP_SCALE: f32 = 100.0;
@@ -120,6 +122,8 @@ fn main() {
             generate_chunks, 
             modify_plane, 
             handle_compute_tasks, 
+            spawn_vegetation_for_chunk,
+            update_tree_lod,
             update_chunk_lod, 
             update_daylight_cycle,
             draw_lod_rings,
@@ -530,7 +534,7 @@ pub fn debugger_ui(
                         chunk_manager.lod_distance_multiplier = 15.0;
                         if let Ok(mut fog) = fog_query.single_mut() {
                             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
-                                *density = 0.000024;
+                                *density = 0.000045;
                             }
                         }
                     }

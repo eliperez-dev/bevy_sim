@@ -5,12 +5,6 @@
 - Add biome-appropriate vegetation placement
 - Implement LOD for vegetation similar to terrain chunks
 
-## GPU Water Animation
-- CPU water animation is currently commented out
-- Implement compute shader-based water waves for better performance
-- Add proper water reflections/refractions
-
-
 ## Audio System
 - Engine sounds (pitch based on throttle/RPM)
 - Wind sounds (volume based on speed)
@@ -22,13 +16,6 @@
 - Weather systems (rain, fog density changes)
 - Cloud shadows on terrain
 
-## Multiplayer Component
-- Network synchronization for multiple aircraft
-- Server/client architecture
-- Player position and state replication
-- Chat system
-- Lobby/session management
-- Latency compensation for flight physics
 
 ## Additional Features
 - Multiple aircraft types with different flight characteristics

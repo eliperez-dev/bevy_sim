@@ -12,7 +12,7 @@ pub fn flight_hud_system(
     wind: Res<Wind>,
     remote_players_query: Query<&Transform, With<network::RemotePlayer>>,
 ) {
-    if control_mode.mode != FlightMode::Aircraft {
+    if control_mode.mode == FlightMode::FreeFlight {
         return;
     }
 
