@@ -718,12 +718,26 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32, spee
     });
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    Basic,
+    Advanced,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphicsPreset {
+    Low,
+    High,
+}
+
 #[derive(Resource)]
 pub struct MultiplayerMenu {
     pub server_address: String,
     pub connection_status: String,
     pub connecting: bool,
     pub connection_receiver: Option<crossbeam_channel::Receiver<Result<NetworkClient, String>>>,
+    pub settings_tab: SettingsTab,
+    pub graphics_preset: GraphicsPreset,
 }
 
 impl Default for MultiplayerMenu {
@@ -733,6 +747,8 @@ impl Default for MultiplayerMenu {
             connection_status: String::new(),
             connecting: false,
             connection_receiver: None,
+            settings_tab: SettingsTab::Basic,
+            graphics_preset: GraphicsPreset::Low,
         }
     }
 }

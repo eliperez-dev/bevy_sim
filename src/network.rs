@@ -10,7 +10,7 @@ pub static TOKIO_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime")
 });
 
-pub const DEFAULT_SERVER_PORT: u16 = 7878;
+pub const _DEFAULT_SERVER_PORT: u16 = 7878;
 pub const DEFAULT_SERVER_ADDR: &str = "192.168.0.184:7878";
 const MAX_MESSAGE_SIZE: usize = 4096;
 
@@ -212,7 +212,7 @@ pub fn receive_server_messages(
 ) {
     let Some(mut client) = client else { return };
     if !client.connected {
-        return;
+        return; 
     }
 
     TOKIO_RUNTIME.block_on(async {
@@ -282,6 +282,9 @@ pub struct UpdateRemotePlayer {
 pub struct DespawnRemotePlayer(pub u32);
 
 #[derive(Event)]
+pub struct DisconnectCleanup;
+
+#[derive(Event)]
 pub struct TeleportToPlayer {
     pub player_id: u32,
     pub position: [f32; 3],
@@ -300,6 +303,13 @@ pub struct LerpTarget {
     pub velocity: Vec3,
 }
 
+#[derive(Resource)]
+pub struct NetworkSmoothingSettings {
+    pub position_smoothing: f32,
+    pub position_damping: f32,
+    pub rotation_smoothing: f32,
+}
+
 #[derive(Component)]
 pub struct PlayerLabel;
 
@@ -313,7 +323,6 @@ pub fn spawn_remote_player(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    time: Res<Time>,
 ) {
     let player_state = &trigger.0;
     
@@ -392,20 +401,18 @@ pub fn update_remote_player(
 pub fn lerp_remote_players(
     mut query: Query<(&mut Transform, &mut LerpTarget), With<RemotePlayer>>,
     time: Res<Time>,
+    settings: Res<NetworkSmoothingSettings>,
 ) {
-    const SMOOTHING: f32 = 8.0;
-    const ROT_SMOOTHING: f32 = 10.0;
-    
     for (mut transform, mut lerp_target) in query.iter_mut() {
         let dt = time.delta_secs();
         
         let position_diff = lerp_target.position - transform.translation;
-        lerp_target.velocity += position_diff * SMOOTHING * dt;
-        lerp_target.velocity *= 0.85_f32.powf(dt * 60.0);
+        lerp_target.velocity += position_diff * settings.position_smoothing * dt;
+        lerp_target.velocity *= settings.position_damping.powf(dt * 60.0);
         
         transform.translation += lerp_target.velocity;
         
-        transform.rotation = transform.rotation.slerp(lerp_target.rotation, 1.0 - 0.01_f32.powf(dt * ROT_SMOOTHING));
+        transform.rotation = transform.rotation.slerp(lerp_target.rotation, 1.0 - 0.01_f32.powf(dt * settings.rotation_smoothing));
     }
 }
 
@@ -429,6 +436,21 @@ pub fn despawn_remote_player(
             commands.entity(entity).despawn();
             break;
         }
+    }
+}
+
+pub fn cleanup_on_disconnect(
+    _trigger: On<DisconnectCleanup>,
+    mut commands: Commands,
+    query: Query<Entity, With<RemotePlayer>>,
+    label_query: Query<Entity, With<PlayerLabelText>>,
+) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+    
+    for entity in label_query.iter() {
+        commands.entity(entity).despawn();
     }
 }
 

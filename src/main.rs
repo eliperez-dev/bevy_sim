@@ -72,7 +72,7 @@ fn main() {
             last_camera_chunk: None,
             to_spawn: Vec::new(),
             lod_to_update: Vec::new(),
-            render_distance: 40,
+            render_distance: 50,
             lod_levels: [
                 (0.70, 20),
                 (1.25, 15),
@@ -98,11 +98,17 @@ fn main() {
         .init_resource::<ControlMode>()
         .init_resource::<Wind>()
         .init_resource::<hud::MultiplayerMenu>()
+        .insert_resource(network::NetworkSmoothingSettings {
+            position_smoothing: 2.0,
+            position_damping: 0.65,
+            rotation_smoothing: 10.0,
+        })
         .add_plugins(EguiPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_observer(network::spawn_remote_player)
         .add_observer(network::update_remote_player)
         .add_observer(network::despawn_remote_player)
+        .add_observer(network::cleanup_on_disconnect)
         .add_observer(network::teleport_to_player)
         .add_systems(Startup, setup_camera_system)
         .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
@@ -264,7 +270,10 @@ fn map_temperature(t: f32) -> (f32, f32) {
 
 /// Format time of day (0-1) as HH:MM
 fn format_game_time(t: f32) -> String {
-    let total_hours = (t * HOURS_PER_DAY - TIME_OFFSET_HOURS) % HOURS_PER_DAY;
+    let mut total_hours = (t * HOURS_PER_DAY - TIME_OFFSET_HOURS) % HOURS_PER_DAY;
+    if total_hours < 0.0 {
+        total_hours += HOURS_PER_DAY;
+    }
     let hours = total_hours.floor() as u32;
     let minutes = ((total_hours - hours as f32) * MINUTES_PER_HOUR).round() as u32;
 
@@ -312,7 +321,7 @@ fn update_debugger(
     message.push_str(&format!("FPS: {:.0}\n", *cached_fps));
     message.push_str(&format!("Position: [{:.0}, {:.0}, {:.0}]\n", cam_trans.x.round(), cam_trans.y.round(), cam_trans.z.round()));
     message.push_str(&format!("Biome: {:?} | Tempature: {:?}F / {:?}C\n", biome, map_temperature(climate.0).0, map_temperature(climate.0).1));
-    message.push_str(&format!("Chunks: {} | Time: {}\n", chunks.spawned_chunks.len(), format_game_time(cycle.time_of_day)));
+    message.push_str(&format!("Chunks: {} | Time: {} ({:.2})\n", chunks.spawned_chunks.len(), format_game_time(cycle.time_of_day), cycle.time_of_day));
 
     message.push_str("\n--- CONTROLS ---\n");
     message.push_str(&format!("Camera Mode: {:?} (Press F to toggle)\n", control_mode.mode));
@@ -423,7 +432,7 @@ fn ui_wind_weather(ui: &mut egui::Ui, wind: &mut Wind) {
 /// Display world and time controls
 fn ui_world_time(ui: &mut egui::Ui, day_cycle: &mut DayNightCycle) {
     ui.add(egui::Slider::new(&mut day_cycle.time_of_day, 0.0..=1.0).text("Time of Day"));
-    ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.1).text("Time Speed"));
+    ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.2).text("Time Speed").logarithmic(true));
     ui.add(egui::Slider::new(&mut day_cycle.inclination, -1.0..=1.0).text("Inclination"));
 }
 
@@ -477,74 +486,145 @@ pub fn debugger_ui(
     mut render_settings: ResMut<RenderSettings>,
     mut aircraft_query: Query<&mut Aircraft, Without<MainCamera>>,
     mut wind: ResMut<Wind>,
-    client: Option<Res<network::NetworkClient>>,
+    mut client: Option<ResMut<network::NetworkClient>>,
     remote_players: Query<(&network::RemotePlayer, &GlobalTransform)>,
     mut commands: Commands,
     mut menu: ResMut<hud::MultiplayerMenu>,
+    mut smoothing_settings: ResMut<network::NetworkSmoothingSettings>,
 ) -> Result<(), > { 
-    egui::Window::new("Simulation Debugger").show(contexts.ctx_mut()?, |ui| {
-
-        ui.collapsing("✈ Aircraft Physics", |ui| {
-            if let Ok(mut aircraft) = aircraft_query.single_mut() {
-                ui_aircraft_physics(ui, &mut aircraft);
-            } else {
-                ui.label(egui::RichText::new("No Aircraft found in scene.").color(egui::Color32::RED));
-            }
+    egui::Window::new("Settings")
+    .default_pos(egui::Pos2::new(20.0, 20.0))
+    .default_size(egui::Vec2::new(150.0, 300.0))
+    .show(contexts.ctx_mut()?, |ui| {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut menu.settings_tab, hud::SettingsTab::Basic, "Basic");
+            ui.selectable_value(&mut menu.settings_tab, hud::SettingsTab::Advanced, "Advanced");
         });
-
-        ui.collapsing("🌪 Wind & Weather", |ui| {
-            ui_wind_weather(ui, &mut wind);
-        });
-
-        ui.collapsing("🌍 World & Time", |ui| {
-            ui_world_time(ui, &mut day_cycle);
-        });
-
-        ui.collapsing("📷 Render Settings", |ui| {
-            ui_render_settings(
-                ui, 
-                &mut wireframe_config, 
-                &mut chunk_manager, 
-                &mut world_settings, 
-                &mut render_settings, 
-                &mut fog_query
-            );
-        });
-
-        ui.collapsing("🌐 Multiplayer", |ui| {
-            if let Some(client) = &client {
-                if client.connected {
-                    ui.label(format!("🟢 Connected (Player ID: {})", client.player_id.unwrap_or(0)));
-                    
-                    if let Some(seed) = client.world_seed {
-                        ui.label(format!("World Seed: {}", seed));
-                    }
-                    
-                    ui.separator();
-                    ui.label(egui::RichText::new("Remote Players").strong());
-                    
-                    if remote_players.is_empty() {
-                        ui.label("No other players connected");
-                    } else {
-                        for (remote_player, transform) in remote_players.iter() {
-                            ui.horizontal(|ui| {
-                                ui.label(format!("Player {}", remote_player.player_id));
-                                if ui.button("Teleport").clicked() {
-                                    commands.trigger(network::TeleportToPlayer {
-                                        player_id: remote_player.player_id,
-                                        position: transform.translation().into(),
-                                        rotation: transform.to_scale_rotation_translation().1.into(),
-                                    });
-                                }
-                            });
+        
+        ui.separator();
+        
+        match menu.settings_tab {
+            hud::SettingsTab::Basic => {
+                ui.heading("Graphics");
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(menu.graphics_preset == hud::GraphicsPreset::Low, "Low").clicked() {
+                        menu.graphics_preset = hud::GraphicsPreset::Low;
+                        chunk_manager.render_distance = 50;
+                        render_settings.just_updated = true;
+                        render_settings.cascades = 0;
+                        chunk_manager.lod_distance_multiplier = 10.0;
+                        if let Ok(mut fog) = fog_query.single_mut() {
+                            if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
+                                *density = 0.000045;
+                            }
                         }
                     }
-                    
-                    ui.separator();
-                    
-                    if ui.button("Disconnect").clicked() {
-                        commands.remove_resource::<network::NetworkClient>();
-                        menu.connection_status = "Disconnected".to_string();
+                    if ui.selectable_label(menu.graphics_preset == hud::GraphicsPreset::High, "High").clicked() {
+                        menu.graphics_preset = hud::GraphicsPreset::High;
+                        chunk_manager.render_distance = 80;
+                        render_settings.just_updated = true;
+                        render_settings.cascades = 2;
+                        chunk_manager.lod_distance_multiplier = 14.0;
+                        if let Ok(mut fog) = fog_query.single_mut() {
+                            if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
+                                *density = 0.000025;
+                            }
+                        }
+                    }
+                });
+                
+                if ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance")).changed() {
+                    render_settings.just_updated = true;
+                }
+                
+                if let Ok(mut fog) = fog_query.single_mut() {
+                    if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
+                        ui.add(egui::Slider::new(density, 0.000005..=0.001).text("Fog Density").logarithmic(true));
+                    }
+                }
+                
+                ui.separator();
+                ui.heading("Time & Weather");
+                ui.horizontal(|ui| {
+                    ui.label(format!("Current Time: {}", format_game_time(day_cycle.time_of_day)));
+                    if day_cycle.speed == 0.0 {
+                        if ui.button("▶ Resume").clicked() {
+                            day_cycle.speed = 0.01;
+                        }
+                    } else {
+                        if ui.button("⏸ Pause").clicked() {
+                            day_cycle.speed = 0.0;
+                        }
+                    }
+                });
+                ui.add(egui::Slider::new(&mut day_cycle.time_of_day, 0.0..=1.0).text("Time of Day"));
+                ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.05).text("Time Speed"));
+                ui.add(egui::Slider::new(&mut wind.wind_speed, 0.0..=200.0).text("Wind Speed"));
+                
+                ui.separator();
+                ui.heading("Multiplayer");
+                
+                if let Some(client) = &mut client {
+                    if client.connected {
+                        ui.label(format!("Connected! (Player ID: {})", client.player_id.unwrap_or(0)));
+                        
+                        ui.separator();
+                        ui.label(egui::RichText::new("Players").strong());
+                        
+                        if remote_players.is_empty() {
+                            ui.label("No other players connected");
+                        } else {
+                            for (remote_player, transform) in remote_players.iter() {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("Player {}", remote_player.player_id));
+                                    if ui.button("Teleport").clicked() {
+                                        commands.trigger(network::TeleportToPlayer {
+                                            player_id: remote_player.player_id,
+                                            position: transform.translation().into(),
+                                            rotation: transform.to_scale_rotation_translation().1.into(),
+                                        });
+                                    }
+                                });
+                            }
+                        }
+                        
+                        ui.separator();
+                        
+                        if ui.button("Disconnect").clicked() {
+                            client.disconnect();
+                            commands.remove_resource::<network::NetworkClient>();
+                            commands.trigger(network::DisconnectCleanup);
+                            menu.connection_status = "Disconnected".to_string();
+                        }
+                    } else {
+                        ui.label("🔴 Not Connected");
+                        ui.separator();
+                        
+                        ui.label("Server Address:");
+                        ui.text_edit_singleline(&mut menu.server_address);
+                        
+                        ui.add_space(5.0);
+                        
+                        if menu.connecting {
+                            ui.label("Connecting...");
+                        } else if ui.button("Connect").clicked() {
+                            let address = menu.server_address.clone();
+                            menu.connecting = true;
+                            menu.connection_status.clear();
+                            
+                            let (tx, rx) = crossbeam_channel::unbounded();
+                            menu.connection_receiver = Some(rx);
+                            
+                            std::thread::spawn(move || {
+                                let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address));
+                                let _ = tx.send(result);
+                            });
+                        }
+                        
+                        if !menu.connection_status.is_empty() {
+                            ui.separator();
+                            ui.colored_label(egui::Color32::RED, &menu.connection_status);
+                        }
                     }
                 } else {
                     ui.label("🔴 Not Connected");
@@ -576,44 +656,107 @@ pub fn debugger_ui(
                         ui.colored_label(egui::Color32::RED, &menu.connection_status);
                     }
                 }
-            } else {
-                ui.label("🔴 Not Connected");
+            },
+            
+            hud::SettingsTab::Advanced => {
+                ui.collapsing("✈ Aircraft Physics", |ui| {
+                    if let Ok(mut aircraft) = aircraft_query.single_mut() {
+                        ui_aircraft_physics(ui, &mut aircraft);
+                    } else {
+                        ui.label(egui::RichText::new("No Aircraft found in scene.").color(egui::Color32::RED));
+                    }
+                });
+
+                ui.collapsing("🌪 Wind & Weather", |ui| {
+                    ui_wind_weather(ui, &mut wind);
+                });
+
+                ui.collapsing("🌍 World & Time", |ui| {
+                    ui_world_time(ui, &mut day_cycle);
+                });
+
+                ui.collapsing("📷 Render Settings", |ui| {
+                    ui_render_settings(
+                        ui, 
+                        &mut wireframe_config, 
+                        &mut chunk_manager, 
+                        &mut world_settings, 
+                        &mut render_settings, 
+                        &mut fog_query
+                    );
+                });
+
+                ui.collapsing("🌐 Multiplayer (Advanced)", |ui| {
+                    if let Some(client) = &mut client {
+                        if client.connected {
+                            ui.label(format!("🟢 Connected (Player ID: {})", client.player_id.unwrap_or(0)));
+                            
+                            if let Some(seed) = client.world_seed {
+                                ui.label(format!("World Seed: {}", seed));
+                            }
+                            
+                            ui.separator();
+                            ui.label(egui::RichText::new("Remote Players").strong());
+                            
+                            if remote_players.is_empty() {
+                                ui.label("No other players connected");
+                            } else {
+                                for (remote_player, transform) in remote_players.iter() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(format!("Player {}", remote_player.player_id));
+                                        if ui.button("Teleport").clicked() {
+                                            commands.trigger(network::TeleportToPlayer {
+                                                player_id: remote_player.player_id,
+                                                position: transform.translation().into(),
+                                                rotation: transform.to_scale_rotation_translation().1.into(),
+                                            });
+                                        }
+                                    });
+                                }
+                            }
+                            
+                            ui.separator();
+                            ui.label(egui::RichText::new("Interpolation Settings").strong());
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Position Smoothing:");
+                                ui.add(egui::Slider::new(&mut smoothing_settings.position_smoothing, 0.5..=10.0).step_by(0.1));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Position Damping:");
+                                ui.add(egui::Slider::new(&mut smoothing_settings.position_damping, 0.5..=0.99).step_by(0.01));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Rotation Smoothing:");
+                                ui.add(egui::Slider::new(&mut smoothing_settings.rotation_smoothing, 1.0..=20.0).step_by(0.5));
+                            });
+                            
+                            ui.separator();
+                            
+                            if ui.button("Disconnect").clicked() {
+                                client.disconnect();
+                                commands.remove_resource::<network::NetworkClient>();
+                                commands.trigger(network::DisconnectCleanup);
+                                menu.connection_status = "Disconnected".to_string();
+                            }
+                        } else {
+                            ui.label("🔴 Not Connected");
+                        }
+                    } else {
+                        ui.label("🔴 Not Connected");
+                    }
+                });
+                
                 ui.separator();
-                
-                ui.label("Server Address:");
-                ui.text_edit_singleline(&mut menu.server_address);
-                
-                ui.add_space(5.0);
-                
-                if menu.connecting {
-                    ui.label("Connecting...");
-                } else if ui.button("Connect").clicked() {
-                    let address = menu.server_address.clone();
-                    menu.connecting = true;
-                    menu.connection_status.clear();
-                    
-                    let (tx, rx) = crossbeam_channel::unbounded();
-                    menu.connection_receiver = Some(rx);
-                    
-                    std::thread::spawn(move || {
-                        let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address));
-                        let _ = tx.send(result);
-                    });
+                if ui.button("Reset Simulation State").clicked() {
+                    day_cycle.time_of_day = 0.5;
+                    if let Ok(mut aircraft) = aircraft_query.single_mut() {
+                        aircraft.speed = 250.0;
+                        aircraft.throttle = 0.8;
+                    }
                 }
-                
-                if !menu.connection_status.is_empty() {
-                    ui.separator();
-                    ui.colored_label(egui::Color32::RED, &menu.connection_status);
-                }
-            }
-        });
-        
-        ui.separator();
-        if ui.button("Reset Simulation State").clicked() {
-            day_cycle.time_of_day = 0.5;
-            if let Ok(mut aircraft) = aircraft_query.single_mut() {
-                aircraft.speed = 250.0;
-                aircraft.throttle = 0.8;
             }
         }
     });

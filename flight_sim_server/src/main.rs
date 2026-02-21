@@ -24,7 +24,7 @@ struct GameServer {
 
 impl GameServer {
     fn new() -> Self {
-        let seed = 1;
+        let seed = rand::random::<u32>();
         println!("🌍 Generated world seed: {}", seed);
         
         Self {
