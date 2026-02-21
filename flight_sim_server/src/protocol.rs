@@ -20,6 +20,8 @@ pub enum ServerMessage {
         your_id: u32,
         seed: u32,
         existing_players: Vec<PlayerState>,
+        time_of_day: f32,
+        speed: f32,
     },
     PlayerJoined {
         player: PlayerState,

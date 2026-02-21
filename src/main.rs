@@ -99,9 +99,8 @@ fn main() {
         .init_resource::<Wind>()
         .init_resource::<hud::MultiplayerMenu>()
         .insert_resource(network::NetworkSmoothingSettings {
-            position_smoothing: 2.0,
-            position_damping: 0.65,
-            rotation_smoothing: 10.0,
+            half_life: 0.3,
+            forward_offset: 120.0,
         })
         .add_plugins(EguiPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
@@ -559,7 +558,7 @@ pub fn debugger_ui(
                 });
                 ui.add(egui::Slider::new(&mut day_cycle.time_of_day, 0.0..=1.0).text("Time of Day"));
                 ui.add(egui::Slider::new(&mut day_cycle.speed, 0.0..=0.05).text("Time Speed"));
-                ui.add(egui::Slider::new(&mut wind.wind_speed, 0.0..=200.0).text("Wind Speed"));
+                ui.add(egui::Slider::new(&mut wind.max_wind_speed, 0.0..=200.0).text("Wind Speed"));
                 
                 ui.separator();
                 ui.heading("Multiplayer");
@@ -719,18 +718,13 @@ pub fn debugger_ui(
                             ui.label(egui::RichText::new("Interpolation Settings").strong());
                             
                             ui.horizontal(|ui| {
-                                ui.label("Position Smoothing:");
-                                ui.add(egui::Slider::new(&mut smoothing_settings.position_smoothing, 0.5..=10.0).step_by(0.1));
+                                ui.label("Smoothing (half-life):");
+                                ui.add(egui::Slider::new(&mut smoothing_settings.half_life, 0.01..=0.5));
                             });
                             
                             ui.horizontal(|ui| {
-                                ui.label("Position Damping:");
-                                ui.add(egui::Slider::new(&mut smoothing_settings.position_damping, 0.5..=0.99).step_by(0.01));
-                            });
-                            
-                            ui.horizontal(|ui| {
-                                ui.label("Rotation Smoothing:");
-                                ui.add(egui::Slider::new(&mut smoothing_settings.rotation_smoothing, 1.0..=20.0).step_by(0.5));
+                                ui.label("Forward offset:");
+                                ui.add(egui::Slider::new(&mut smoothing_settings.forward_offset, 0.0..=200.0));
                             });
                             
                             ui.separator();

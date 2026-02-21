@@ -20,6 +20,8 @@ struct GameServer {
     players: PlayerMap,
     senders: ClientSenders,
     next_player_id: Arc<RwLock<u32>>,
+    time_of_day: Arc<RwLock<f32>>,
+    speed: f32,
 }
 
 impl GameServer {
@@ -32,6 +34,8 @@ impl GameServer {
             players: Arc::new(RwLock::new(HashMap::new())),
             senders: Arc::new(RwLock::new(HashMap::new())),
             next_player_id: Arc::new(RwLock::new(1)),
+            time_of_day: Arc::new(RwLock::new(0.50)),
+            speed: 0.003,
         }
     }
 
@@ -74,6 +78,20 @@ async fn main() {
     println!("✅ Server listening on {}", SERVER_ADDR);
     println!("Waiting for players...\n");
 
+    let server_clone = Arc::clone(&server);
+    tokio::spawn(async move {
+        let mut last_update = std::time::Instant::now();
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
+            let now = std::time::Instant::now();
+            let delta_secs = (now - last_update).as_secs_f32();
+            last_update = now;
+
+            let mut time = server_clone.time_of_day.write().await;
+            *time = (*time + server_clone.speed * delta_secs) % 1.0;
+        }
+    });
+
     loop {
         match listener.accept().await {
             Ok((socket, addr)) => {
@@ -114,6 +132,8 @@ async fn handle_client(server: Arc<GameServer>, socket: TcpStream) {
         your_id: player_id,
         seed: server.seed,
         existing_players,
+        time_of_day: *server.time_of_day.read().await,
+        speed: server.speed,
     };
     
     server.send_to(player_id, welcome).await;

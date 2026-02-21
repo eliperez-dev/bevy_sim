@@ -6,6 +6,8 @@ use tokio::sync::mpsc;
 use std::sync::Arc;
 use once_cell::sync::Lazy;
 
+use crate::consts::world_units_to_meters;
+
 pub static TOKIO_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime")
 });
@@ -34,6 +36,8 @@ pub enum ServerMessage {
         your_id: u32,
         seed: u32,
         existing_players: Vec<PlayerState>,
+        time_of_day: f32,
+        speed: f32,
     },
     PlayerJoined {
         player: PlayerState,
@@ -185,7 +189,7 @@ pub fn send_player_updates(
         return;
     }
 
-    const SEND_INTERVAL: f32 = 1.0 / 30.0;
+    const SEND_INTERVAL: f32 = 1.0 / 120.0;
     if time.elapsed_secs() - *last_send < SEND_INTERVAL {
         return;
     }
@@ -209,6 +213,7 @@ pub fn receive_server_messages(
     mut chunk_manager: ResMut<crate::world_generation::ChunkManager>,
     chunks: Query<(Entity, &crate::world_generation::Chunk)>,
     mut render_settings: ResMut<crate::RenderSettings>,
+    mut day_cycle: ResMut<crate::day_cycle::DayNightCycle>,
 ) {
     let Some(mut client) = client else { return };
     if !client.connected {
@@ -218,10 +223,13 @@ pub fn receive_server_messages(
     TOKIO_RUNTIME.block_on(async {
         while let Some(message) = client.try_recv().await {
                 match message {
-                    ServerMessage::Welcome { your_id, seed, existing_players } => {
+                    ServerMessage::Welcome { your_id, seed, existing_players, time_of_day, speed } => {
                         println!("✅ Connected to server! Player ID: {}, Seed: {}", your_id, seed);
                         client.player_id = Some(your_id);
                         client.world_seed = Some(seed);
+                        
+                        day_cycle.time_of_day = time_of_day;
+                        day_cycle.speed = speed;
                         
                         // Update world generator with server seed
                         *world_generator = crate::world_generation::WorldGenerator::new(seed);
@@ -299,15 +307,14 @@ pub struct RemotePlayer {
 #[derive(Component)]
 pub struct LerpTarget {
     pub position: Vec3,
+    pub last_position: Vec3,
     pub rotation: Quat,
-    pub velocity: Vec3,
 }
 
 #[derive(Resource)]
 pub struct NetworkSmoothingSettings {
-    pub position_smoothing: f32,
-    pub position_damping: f32,
-    pub rotation_smoothing: f32,
+    pub half_life: f32,
+    pub forward_offset: f32,
 }
 
 #[derive(Component)]
@@ -315,6 +322,11 @@ pub struct PlayerLabel;
 
 #[derive(Component)]
 pub struct PlayerLabelText {
+    pub player_id: u32,
+}
+
+#[derive(Component)]
+pub struct PlayerDistanceLabel {
     pub player_id: u32,
 }
 
@@ -336,8 +348,8 @@ pub fn spawn_remote_player(
             .with_scale(Vec3::splat(0.15)),
         LerpTarget {
             position,
+            last_position: position,
             rotation,
-            velocity: Vec3::ZERO,
         },
         Visibility::default(),
         InheritedVisibility::default(),
@@ -377,6 +389,23 @@ pub fn spawn_remote_player(
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
     ));
 
+    commands.spawn((
+        Text::new("0m"),
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+        TextFont {
+            font_size: 16.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+        PlayerDistanceLabel {
+            player_id: player_state.id,
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+    ));
+
     commands.entity(plane_entity).add_children(&[model_correction, label]);
 }
 
@@ -390,6 +419,7 @@ pub fn update_remote_player(
     for (entity, remote_player) in remote_players.iter() {
         if remote_player.player_id == event.id {
             if let Ok(mut lerp_target) = query.get_mut(entity) {
+                lerp_target.last_position = lerp_target.position;
                 lerp_target.position = Vec3::from(event.position);
                 lerp_target.rotation = Quat::from_array(event.rotation);
             }
@@ -399,20 +429,19 @@ pub fn update_remote_player(
 }
 
 pub fn lerp_remote_players(
-    mut query: Query<(&mut Transform, &mut LerpTarget), With<RemotePlayer>>,
+    mut query: Query<(&mut Transform, &LerpTarget), With<RemotePlayer>>,
     time: Res<Time>,
     settings: Res<NetworkSmoothingSettings>,
 ) {
-    for (mut transform, mut lerp_target) in query.iter_mut() {
+    for (mut transform, lerp_target) in query.iter_mut() {
         let dt = time.delta_secs();
+        let t = 1.0 - 0.5_f32.powf(dt / settings.half_life);
         
-        let position_diff = lerp_target.position - transform.translation;
-        lerp_target.velocity += position_diff * settings.position_smoothing * dt;
-        lerp_target.velocity *= settings.position_damping.powf(dt * 60.0);
+        let forward = lerp_target.rotation * Vec3::NEG_Z;
+        let predicted_position = lerp_target.position + (lerp_target.position - lerp_target.last_position) + forward * settings.forward_offset;
         
-        transform.translation += lerp_target.velocity;
-        
-        transform.rotation = transform.rotation.slerp(lerp_target.rotation, 1.0 - 0.01_f32.powf(dt * settings.rotation_smoothing));
+        transform.translation = transform.translation.lerp(predicted_position, t);
+        transform.rotation = transform.rotation.slerp(lerp_target.rotation, t);
     }
 }
 
@@ -421,6 +450,7 @@ pub fn despawn_remote_player(
     mut commands: Commands,
     query: Query<(Entity, &RemotePlayer)>,
     label_query: Query<(Entity, &PlayerLabelText)>,
+    distance_label_query: Query<(Entity, &PlayerDistanceLabel)>,
 ) {
     let player_id = trigger.0;
     
@@ -437,13 +467,22 @@ pub fn despawn_remote_player(
             break;
         }
     }
+    
+    for (entity, distance_label) in distance_label_query.iter() {
+        if distance_label.player_id == player_id {
+            commands.entity(entity).despawn();
+            break;
+        }
+    }
 }
+
 
 pub fn cleanup_on_disconnect(
     _trigger: On<DisconnectCleanup>,
     mut commands: Commands,
     query: Query<Entity, With<RemotePlayer>>,
     label_query: Query<Entity, With<PlayerLabelText>>,
+    distance_label_query: Query<Entity, With<PlayerDistanceLabel>>,
 ) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
@@ -452,14 +491,21 @@ pub fn cleanup_on_disconnect(
     for entity in label_query.iter() {
         commands.entity(entity).despawn();
     }
+    
+    for entity in distance_label_query.iter() {
+        commands.entity(entity).despawn();
+    }
 }
 
 pub fn update_player_labels(
     camera_query: Query<(&GlobalTransform, &Camera), With<crate::controls::MainCamera>>,
     remote_players: Query<(&GlobalTransform, &RemotePlayer)>,
+    aircraft_query: Query<&Transform, With<crate::controls::Aircraft>>,
     mut label_text_query: Query<(&mut Node, &PlayerLabelText)>,
+    mut distance_label_query: Query<(&mut Node, &mut Text, &PlayerDistanceLabel), Without<PlayerLabelText>>,
 ) {
     let Ok((camera_transform, camera)) = camera_query.single() else { return };
+    let Ok(aircraft_transform) = aircraft_query.single() else { return };
     
     for (mut style, label_text) in label_text_query.iter_mut() {
         for (player_transform, remote_player) in remote_players.iter() {
@@ -469,6 +515,31 @@ pub fn update_player_labels(
                 if let Ok(screen_pos) = camera.world_to_viewport(camera_transform, player_pos) {
                     style.left = Val::Px(screen_pos.x);
                     style.top = Val::Px(screen_pos.y);
+                } else {
+                    style.left = Val::Px(-1000.0);
+                    style.top = Val::Px(-1000.0);
+                }
+                break;
+            }
+        }
+    }
+    
+    for (mut style, mut text, distance_label) in distance_label_query.iter_mut() {
+        for (player_transform, remote_player) in remote_players.iter() {
+            if remote_player.player_id == distance_label.player_id {
+                let distance = aircraft_transform.translation.distance(player_transform.translation());
+                let meters = world_units_to_meters(distance);
+                **text =  if distance < 1000.0 {
+                    format!("{:.0}m", meters)
+                } else {
+                    format!("{}km", (meters / 100.0).round() / 10.0)
+                };
+                
+                let player_pos = player_transform.translation() + Vec3::new(0.0, 40.0, 0.0);
+                
+                if let Ok(screen_pos) = camera.world_to_viewport(camera_transform, player_pos) {
+                    style.left = Val::Px(screen_pos.x);
+                    style.top = Val::Px(screen_pos.y + 24.0);
                 } else {
                     style.left = Val::Px(-1000.0);
                     style.top = Val::Px(-1000.0);

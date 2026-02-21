@@ -4,12 +4,16 @@ use bevy::prelude::Color;
 pub const OCEAN_THRESHOLD: f32 = 0.55;
 
 pub const CHUNK_SIZE: f32 = 1000.0; 
-pub const MAP_HEIGHT_SCALE: f32 = 330.0;
+pub const MAP_HEIGHT_SCALE: f32 = 500.0;
 
 pub const MAX_ILLUMANENCE: f32 = 5_300.0;
 pub const TERRAIN_HORIZONTAL_SCALE: f32 = 1.0;
 
-pub const RESPAWN_HEIGHT: f32 = 250.0;
+pub const RESPAWN_HEIGHT: f32 = 500.0;
+
+pub fn world_units_to_meters(world_units: f32) -> f32 {
+    world_units * 0.55817
+}
 
 pub struct TerrainStop {
     pub height: f32,

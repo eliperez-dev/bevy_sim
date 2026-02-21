@@ -50,8 +50,8 @@ pub fn update_daylight_cycle(
         light.illuminance = daylight * MAX_ILLUMANENCE;
 
         if let Ok((mut fog, mut ambient)) = env_query.single_mut() {
-            let min_ambient = 50.0;
-            let max_ambient = 200.0;
+            let min_ambient = 70.0;
+            let max_ambient = 180.0;
             ambient.brightness = min_ambient + (max_ambient - min_ambient) * daylight; 
 
             let night_fog = Vec3::new(0.1, 0.1, 0.2);

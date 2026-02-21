@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui::{self, Frame}};
-use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera, Wind};
+use crate::{consts::world_units_to_meters, controls::{Aircraft, ControlMode, FlightMode, MainCamera, Wind}};
 use crate::network::{self, NetworkClient, DEFAULT_SERVER_ADDR};
 use crossbeam_channel;
 
@@ -18,8 +18,8 @@ pub fn flight_hud_system(
     let Ok((plane_transform, aircraft)) = aircraft_query.single() else { return };
     let Ok(_camera_transform) = camera_query.single() else { return };
 
-    let altitude = plane_transform.translation.y;
-    let speed = aircraft.speed;
+    let altitude = world_units_to_meters(plane_transform.translation.y);
+    let speed = world_units_to_meters(aircraft.speed);
     
     let forward = plane_transform.forward().as_vec3();
     let heading = calculate_heading(forward);
@@ -454,7 +454,7 @@ fn draw_airspeed_tape(ui: &mut egui::Ui, speed: f32, aircraft: &Aircraft) {
         let rect = response.rect;
         let center_y = rect.center().y;
 
-        let aircraft_max_speed = aircraft.max_speed;
+        let aircraft_max_speed = world_units_to_meters(aircraft.max_speed);
         
         let speed_ranges = [
             (0.0,                      aircraft_max_speed * 0.3, egui::Color32::from_rgb(150, 0, 0)),
