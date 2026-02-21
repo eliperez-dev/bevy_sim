@@ -185,7 +185,7 @@ pub fn send_player_updates(
         return;
     }
 
-    const SEND_INTERVAL: f32 = 0.05;
+    const SEND_INTERVAL: f32 = 1.0 / 30.0;
     if time.elapsed_secs() - *last_send < SEND_INTERVAL {
         return;
     }
