@@ -7,7 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, RwLock};
 
-const SERVER_ADDR: &str = "127.0.0.1:7878";
+const SERVER_ADDR: &str = "0.0.0.0:7878";
 const MAX_MESSAGE_SIZE: usize = 4096; 
 
 type PlayerId = u32;
