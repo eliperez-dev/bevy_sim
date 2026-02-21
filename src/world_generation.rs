@@ -350,9 +350,9 @@ pub fn handle_compute_tasks(
 
 #[derive(Component)]
 pub struct Chunk {
-    x: i32,
-    z: i32,
-    current_lod: u32,
+    pub x: i32,
+    pub z: i32,
+    pub current_lod: u32,
 }
 
 #[derive(Resource, Default)]
@@ -407,7 +407,7 @@ pub fn generate_chunks(
     mut last_render_distance: Local<Option<i32>>,
     settings: Res<WorldGenerationSettings>,
     mut sun_query: Query<&mut CascadeShadowConfig, (With<crate::day_cycle::Sun>, Without<MainCamera>)>,
-    render_settings: ResMut<crate::RenderSettings>,
+    mut render_settings: ResMut<crate::RenderSettings>,
 ) {
     let mut cascade = sun_query.single_mut().unwrap();
 
@@ -423,6 +423,7 @@ pub fn generate_chunks(
     {
         chunk_manager.last_camera_chunk = Some((cam_x, cam_z));
         *last_render_distance = Some(chunk_manager.render_distance);
+        render_settings.just_updated = false;
         
         let render_distance_sq = (chunk_manager.render_distance as f32).powi(2);
         chunk_manager.to_spawn.clear();

@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui::{self, Frame}};
 use crate::controls::{Aircraft, ControlMode, FlightMode, MainCamera, Wind};
+use crate::network::{self, NetworkClient, DEFAULT_SERVER_ADDR};
+use crossbeam_channel;
 
 pub fn flight_hud_system(
     mut contexts: EguiContexts,
@@ -714,4 +716,125 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32, spee
             egui::Color32::WHITE,
         );
     });
+}
+
+#[derive(Resource)]
+pub struct MultiplayerMenu {
+    pub show: bool,
+    pub server_address: String,
+    pub connection_status: String,
+    pub connecting: bool,
+    pub connection_receiver: Option<crossbeam_channel::Receiver<Result<NetworkClient, String>>>,
+}
+
+impl Default for MultiplayerMenu {
+    fn default() -> Self {
+        Self {
+            show: false,
+            server_address: DEFAULT_SERVER_ADDR.to_string(),
+            connection_status: String::new(),
+            connecting: false,
+            connection_receiver: None,
+        }
+    }
+}
+
+pub fn multiplayer_menu_ui(
+    mut contexts: EguiContexts,
+    mut menu: ResMut<MultiplayerMenu>,
+    mut commands: Commands,
+    client: Option<ResMut<NetworkClient>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyM) {
+        menu.show = !menu.show;
+    }
+
+    if !menu.show {
+        return;
+    }
+
+    let ctx = contexts.ctx_mut().unwrap();
+    
+    egui::Window::new("Multiplayer")
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .collapsible(false)
+        .show(ctx, |ui| {
+            ui.heading("Multiplayer Settings");
+            ui.separator();
+
+            if let Some(client) = &client {
+                if client.connected {
+                    ui.label(format!("🟢 Connected (Player ID: {})", client.player_id.unwrap_or(0)));
+                    
+                    if let Some(seed) = client.world_seed {
+                        ui.label(format!("World Seed: {}", seed));
+                    }
+                    
+                    ui.separator();
+                    
+                    if ui.button("Disconnect").clicked() {
+                        commands.remove_resource::<NetworkClient>();
+                        menu.connection_status = "Disconnected".to_string();
+                    }
+                } else {
+                    ui.label("🔴 Not Connected");
+                }
+            } else {
+                ui.label("🔴 Not Connected");
+                ui.separator();
+                
+                ui.label("Server Address:");
+                ui.text_edit_singleline(&mut menu.server_address);
+                
+                ui.add_space(10.0);
+                
+                if menu.connecting {
+                    ui.label("Connecting...");
+                } else if ui.button("Connect").clicked() {
+                    let address = menu.server_address.clone();
+                    menu.connecting = true;
+                    menu.connection_status.clear();
+                    
+                    let (tx, rx) = crossbeam_channel::unbounded();
+                    menu.connection_receiver = Some(rx);
+                    
+                    std::thread::spawn(move || {
+                        let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address));
+                        let _ = tx.send(result);
+                    });
+                }
+                
+                if !menu.connection_status.is_empty() {
+                    ui.separator();
+                    ui.colored_label(egui::Color32::RED, &menu.connection_status);
+                }
+            }
+            
+            ui.separator();
+            ui.label("Press M to toggle this menu");
+        });
+}
+
+pub fn process_connection_results(
+    mut menu: ResMut<MultiplayerMenu>,
+    mut commands: Commands,
+) {
+    if let Some(rx) = &menu.connection_receiver {
+        if let Ok(result) = rx.try_recv() {
+            menu.connecting = false;
+            menu.connection_receiver = None;
+            
+            match result {
+                Ok(client) => {
+                    menu.connection_status = "Connected!".to_string();
+                    commands.insert_resource(client);
+                }
+                Err(e) => {
+                    menu.connection_status = format!("Connection failed: {}", e);
+                }
+            }
+        }
+    }
 }

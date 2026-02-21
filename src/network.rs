@@ -1,0 +1,346 @@
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use std::sync::Arc;
+use once_cell::sync::Lazy;
+
+pub static TOKIO_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime")
+});
+
+pub const DEFAULT_SERVER_PORT: u16 = 7878;
+pub const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:7878";
+const MAX_MESSAGE_SIZE: usize = 4096;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerState {
+    pub id: u32,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ClientMessage {
+    Join { name: String },
+    UpdatePosition { position: [f32; 3], rotation: [f32; 4] },
+    Disconnect,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ServerMessage {
+    Welcome {
+        your_id: u32,
+        seed: u32,
+        existing_players: Vec<PlayerState>,
+    },
+    PlayerJoined {
+        player: PlayerState,
+    },
+    PlayerUpdate {
+        id: u32,
+        position: [f32; 3],
+        rotation: [f32; 4],
+    },
+    PlayerLeft {
+        id: u32,
+    },
+    Error {
+        message: String,
+    },
+}
+
+#[derive(Resource)]
+pub struct NetworkClient {
+    pub player_id: Option<u32>,
+    pub connected: bool,
+    pub world_seed: Option<u32>,
+    send_tx: mpsc::UnboundedSender<ClientMessage>,
+    recv_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<ServerMessage>>>,
+}
+
+impl NetworkClient {
+    pub fn send(&self, message: ClientMessage) {
+        let _ = self.send_tx.send(message);
+    }
+
+    pub async fn try_recv(&self) -> Option<ServerMessage> {
+        let mut rx = self.recv_rx.lock().await;
+        rx.try_recv().ok()
+    }
+
+    pub fn disconnect(&mut self) {
+        if self.connected {
+            self.send(ClientMessage::Disconnect);
+            self.connected = false;
+        }
+    }
+}
+
+pub async fn connect_to_server(address: &str) -> Result<NetworkClient, String> {
+    let stream = TcpStream::connect(address)
+        .await
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+
+    let (read_half, write_half) = stream.into_split();
+
+    let (send_tx, mut send_rx) = mpsc::unbounded_channel::<ClientMessage>();
+    let (recv_tx, recv_rx) = mpsc::unbounded_channel::<ServerMessage>();
+
+    TOKIO_RUNTIME.spawn(async move {
+        let mut write_half = write_half;
+        while let Some(message) = send_rx.recv().await {
+            println!("Client sending message: {:?}", message);
+            if let Err(e) = send_message(&mut write_half, &message).await {
+                eprintln!("Failed to send message: {}", e);
+                break;
+            }
+        }
+        println!("Client write task ended");
+    });
+
+    let recv_tx_clone = recv_tx.clone();
+    TOKIO_RUNTIME.spawn(async move {
+        let mut read_half = read_half;
+        println!("Client read task started");
+        loop {
+            match receive_message(&mut read_half).await {
+                Ok(Some(message)) => {
+                    println!("Client received message: {:?}", message);
+                    if recv_tx_clone.send(message).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    println!("Server disconnected");
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("Error receiving message: {}", e);
+                    break;
+                }
+            }
+        }
+        println!("Client read task ended");
+    });
+
+    Ok(NetworkClient {
+        player_id: None,
+        connected: true,
+        world_seed: None,
+        send_tx,
+        recv_rx: Arc::new(tokio::sync::Mutex::new(recv_rx)),
+    })
+}
+
+async fn send_message(
+    writer: &mut tokio::net::tcp::OwnedWriteHalf,
+    message: &ClientMessage,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let data = bincode::serialize(message)?;
+    let len = data.len() as u32;
+    
+    writer.write_all(&len.to_le_bytes()).await?;
+    writer.write_all(&data).await?;
+    writer.flush().await?;
+    
+    Ok(())
+}
+
+async fn receive_message(
+    reader: &mut tokio::net::tcp::OwnedReadHalf,
+) -> Result<Option<ServerMessage>, Box<dyn std::error::Error>> {
+    let mut len_bytes = [0u8; 4];
+    
+    match reader.read_exact(&mut len_bytes).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+            return Ok(None);
+        }
+        Err(e) => return Err(Box::new(e)),
+    }
+    
+    let len = u32::from_le_bytes(len_bytes) as usize;
+    
+    if len > MAX_MESSAGE_SIZE {
+        return Err("Message too large".into());
+    }
+    
+    let mut buffer = vec![0u8; len];
+    reader.read_exact(&mut buffer).await?;
+    
+    let message = bincode::deserialize(&buffer)?;
+    Ok(Some(message))
+}
+
+pub fn send_player_updates(
+    client: Option<ResMut<NetworkClient>>,
+    aircraft_query: Query<&Transform, With<crate::controls::Aircraft>>,
+    time: Res<Time>,
+    mut last_send: Local<f32>,
+) {
+    let Some(client) = client else { return };
+    if !client.connected {
+        return;
+    }
+
+    const SEND_INTERVAL: f32 = 0.05;
+    if time.elapsed_secs() - *last_send < SEND_INTERVAL {
+        return;
+    }
+    *last_send = time.elapsed_secs();
+
+    if let Some(transform) = aircraft_query.iter().next() {
+        let position = transform.translation;
+        let rotation = transform.rotation;
+
+        client.send(ClientMessage::UpdatePosition {
+            position: [position.x, position.y, position.z],
+            rotation: [rotation.x, rotation.y, rotation.z, rotation.w],
+        });
+    }
+}
+
+pub fn receive_server_messages(
+    client: Option<ResMut<NetworkClient>>,
+    mut commands: Commands,
+    mut world_generator: ResMut<crate::world_generation::WorldGenerator>,
+    mut chunk_manager: ResMut<crate::world_generation::ChunkManager>,
+    chunks: Query<(Entity, &crate::world_generation::Chunk)>,
+    mut render_settings: ResMut<crate::RenderSettings>,
+) {
+    let Some(mut client) = client else { return };
+    if !client.connected {
+        return;
+    }
+
+    TOKIO_RUNTIME.block_on(async {
+        while let Some(message) = client.try_recv().await {
+                match message {
+                    ServerMessage::Welcome { your_id, seed, existing_players } => {
+                        println!("✅ Connected to server! Player ID: {}, Seed: {}", your_id, seed);
+                        client.player_id = Some(your_id);
+                        client.world_seed = Some(seed);
+                        
+                        // Update world generator with server seed
+                        *world_generator = crate::world_generation::WorldGenerator::new(seed);
+                        
+                        // Despawn all existing chunks
+                        for (entity, chunk) in chunks.iter() {
+                            commands.entity(entity).despawn();
+                            chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                        }
+                        
+                        println!("🔄 Regenerating world with seed {}", seed);
+                        
+                        // Reset chunk manager state to trigger regeneration
+                        chunk_manager.last_camera_chunk = None;
+                        chunk_manager.to_spawn.clear();
+                        chunk_manager.lod_to_update.clear();
+                        
+                        // Force chunk regeneration
+                        render_settings.just_updated = true;
+                        
+                        for player in existing_players {
+                            println!("Player {} already in game", player.id);
+                            commands.trigger(SpawnRemotePlayer(player));
+                        }
+                    }
+                    ServerMessage::PlayerJoined { player } => {
+                        println!("Player {} joined", player.id);
+                        commands.trigger(SpawnRemotePlayer(player));
+                    }
+                    ServerMessage::PlayerUpdate { id, position, rotation } => {
+                        commands.trigger(UpdateRemotePlayer { id, position, rotation });
+                    }
+                    ServerMessage::PlayerLeft { id } => {
+                        println!("Player {} left", id);
+                        commands.trigger(DespawnRemotePlayer(id));
+                    }
+                    ServerMessage::Error { message } => {
+                        eprintln!("Server error: {}", message);
+                    }
+                }
+            }
+    });
+}
+
+#[derive(Event)]
+pub struct SpawnRemotePlayer(pub PlayerState);
+
+#[derive(Event)]
+pub struct UpdateRemotePlayer {
+    pub id: u32,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+}
+
+#[derive(Event)]
+pub struct DespawnRemotePlayer(pub u32);
+
+#[derive(Component)]
+pub struct RemotePlayer {
+    pub player_id: u32,
+}
+
+pub fn spawn_remote_player(
+    trigger: On<SpawnRemotePlayer>,
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+) {
+    let player_state = &trigger.0;
+    
+    let position = Vec3::from(player_state.position);
+    let rotation = Quat::from_array(player_state.rotation);
+
+    let plane_entity = commands.spawn((
+        RemotePlayer { player_id: player_state.id },
+        Transform::from_translation(position)
+            .with_rotation(rotation)
+            .with_scale(Vec3::splat(0.1)),
+        Visibility::default(),
+        InheritedVisibility::default(),
+    )).id();
+
+    let model_correction = commands.spawn(SceneRoot(
+        asset_server.load("low-poly_airplane/scene.gltf#Scene0")
+    )).insert(Transform::from_rotation(
+        Quat::from_rotation_y((180.0f32).to_radians())
+    )).id();
+
+    commands.entity(plane_entity).add_child(model_correction);
+}
+
+pub fn update_remote_player(
+    trigger: On<UpdateRemotePlayer>,
+    mut query: Query<&mut Transform, With<RemotePlayer>>,
+    remote_players: Query<(Entity, &RemotePlayer)>,
+) {
+    let event = &trigger;
+    
+    for (entity, remote_player) in remote_players.iter() {
+        if remote_player.player_id == event.id {
+            if let Ok(mut transform) = query.get_mut(entity) {
+                transform.translation = Vec3::from(event.position);
+                transform.rotation = Quat::from_array(event.rotation);
+            }
+            break;
+        }
+    }
+}
+
+pub fn despawn_remote_player(
+    trigger: On<DespawnRemotePlayer>,
+    mut commands: Commands,
+    query: Query<(Entity, &RemotePlayer)>,
+) {
+    let player_id = trigger.0;
+    
+    for (entity, remote_player) in query.iter() {
+        if remote_player.player_id == player_id {
+            commands.entity(entity).despawn();
+            break;
+        }
+    }
+} 

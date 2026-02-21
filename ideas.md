@@ -1,10 +1,5 @@
 # Ideas for Bevy Flight Simulator
 
-## Terrain Collision Detection
-- Add collision detection and response system
-- Implement crash detection
-- Currently the aircraft can fly through terrain
-
 ## Trees/Vegetation System
 - Tree models exist (`pine tree.gltf`, `tree.gltf`) but no spawning implemented
 - Add biome-appropriate vegetation placement

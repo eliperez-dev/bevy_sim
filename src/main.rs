@@ -23,6 +23,7 @@ mod consts;
 mod day_cycle;
 mod controls;
 mod hud;
+mod network;
 
 // Temperature conversion constants
 const TEMP_SCALE: f32 = 100.0;
@@ -96,10 +97,14 @@ fn main() {
         })
         .init_resource::<ControlMode>()
         .init_resource::<Wind>()
+        .init_resource::<hud::MultiplayerMenu>()
         .add_plugins(EguiPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_observer(network::spawn_remote_player)
+        .add_observer(network::update_remote_player)
+        .add_observer(network::despawn_remote_player)
         .add_systems(Startup, setup_camera_system)
-        .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
+        .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system, hud::multiplayer_menu_ui))
         .add_systems(Startup, (setup, setup_camera_fog, spawn_stars).chain())
         .add_systems(Update, (
             evolve_wind,
@@ -111,6 +116,9 @@ fn main() {
             update_chunk_lod, 
             update_daylight_cycle,
             draw_lod_rings,
+            network::send_player_updates,
+            network::receive_server_messages,
+            hud::process_connection_results,
         ))
         .add_systems(PostUpdate, (
             despawn_out_of_bounds_chunks,
@@ -146,7 +154,7 @@ fn setup(
 ) {
     let cascade_shadow_config = CascadeShadowConfigBuilder::default().build();
 
-    let world_gen = WorldGenerator::new(rand::random::<u32>());
+    let world_gen = WorldGenerator::new(3);
     let spawn_pos = [0.0, 0.0, 0.0];
     let terrain_height = world_gen.get_terrain_height(&spawn_pos);
     let spawn_height = (terrain_height + RESPAWN_HEIGHT).max(RESPAWN_HEIGHT);
@@ -468,7 +476,6 @@ pub fn debugger_ui(
     mut wind: ResMut<Wind>,
 ) -> Result<(), > { 
     egui::Window::new("Simulation Debugger").show(contexts.ctx_mut()?, |ui| {
-        render_settings.just_updated = false;
 
         ui.collapsing("✈ Aircraft Physics", |ui| {
             if let Ok(mut aircraft) = aircraft_query.single_mut() {

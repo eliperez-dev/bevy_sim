@@ -1,0 +1,10 @@
+[package]
+name = "flight_sim_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+rand = "0.10.0"
