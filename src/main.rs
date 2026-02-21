@@ -118,6 +118,7 @@ fn main() {
             draw_lod_rings,
             network::send_player_updates,
             network::receive_server_messages,
+            network::update_player_labels,
             hud::process_connection_results,
         ))
         .add_systems(PostUpdate, (

@@ -284,10 +284,20 @@ pub struct RemotePlayer {
     pub player_id: u32,
 }
 
+#[derive(Component)]
+pub struct PlayerLabel;
+
+#[derive(Component)]
+pub struct PlayerLabelText {
+    pub player_id: u32,
+}
+
 pub fn spawn_remote_player(
     trigger: On<SpawnRemotePlayer>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let player_state = &trigger.0;
     
@@ -309,7 +319,35 @@ pub fn spawn_remote_player(
         Quat::from_rotation_y((180.0f32).to_radians())
     )).id();
 
-    commands.entity(plane_entity).add_child(model_correction);
+    let label = commands.spawn((
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.0, 0.0),
+            emissive: LinearRgba::rgb(10.0, 0.0, 0.0),
+            unlit: true,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 150.0, 0.0),
+        PlayerLabel,
+    )).id();
+
+    commands.spawn((
+        Text::new(format!("Player {}", player_state.id)),
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+        TextFont {
+            font_size: 20.0,
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 1.0, 1.0)),
+        PlayerLabelText {
+            player_id: player_state.id,
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+    ));
+
+    commands.entity(plane_entity).add_children(&[model_correction, label]);
 }
 
 pub fn update_remote_player(
@@ -334,6 +372,7 @@ pub fn despawn_remote_player(
     trigger: On<DespawnRemotePlayer>,
     mut commands: Commands,
     query: Query<(Entity, &RemotePlayer)>,
+    label_query: Query<(Entity, &PlayerLabelText)>,
 ) {
     let player_id = trigger.0;
     
@@ -343,4 +382,36 @@ pub fn despawn_remote_player(
             break;
         }
     }
-} 
+    
+    for (entity, label_text) in label_query.iter() {
+        if label_text.player_id == player_id {
+            commands.entity(entity).despawn();
+            break;
+        }
+    }
+}
+
+pub fn update_player_labels(
+    camera_query: Query<(&GlobalTransform, &Camera), With<crate::controls::MainCamera>>,
+    remote_players: Query<(&GlobalTransform, &RemotePlayer)>,
+    mut label_text_query: Query<(&mut Node, &PlayerLabelText)>,
+) {
+    let Ok((camera_transform, camera)) = camera_query.single() else { return };
+    
+    for (mut style, label_text) in label_text_query.iter_mut() {
+        for (player_transform, remote_player) in remote_players.iter() {
+            if remote_player.player_id == label_text.player_id {
+                let player_pos = player_transform.translation() + Vec3::new(0.0, 40.0, 0.0);
+                
+                if let Ok(screen_pos) = camera.world_to_viewport(camera_transform, player_pos) {
+                    style.left = Val::Px(screen_pos.x);
+                    style.top = Val::Px(screen_pos.y);
+                } else {
+                    style.left = Val::Px(-1000.0);
+                    style.top = Val::Px(-1000.0);
+                }
+                break;
+            }
+        }
+    }
+}
