@@ -89,15 +89,15 @@ impl WorldGenerator {
     pub fn new(seed: u32) -> Self {
         Self {
             terrain_layers: vec![
-                PerlinLayer::new(seed,       0.08, 4.5),    
-                PerlinLayer::new(seed,       0.20, 3.5),      
-                PerlinLayer::new(seed + 100, 0.5, 1.75), 
-                PerlinLayer::new(seed + 200, 1.0, 0.5),  
-                PerlinLayer::new(seed + 300, 2.0, 0.4),  
+                PerlinLayer::new(seed,       0.08 * TERRAIN_HORIZONTAL_SCALE, 4.5),    
+                PerlinLayer::new(seed,       0.20 * TERRAIN_HORIZONTAL_SCALE, 3.5),      
+                PerlinLayer::new(seed + 100, 0.5 * TERRAIN_HORIZONTAL_SCALE, 1.75), 
+                PerlinLayer::new(seed + 200, 1.0 * TERRAIN_HORIZONTAL_SCALE, 0.5),  
+                PerlinLayer::new(seed + 300, 2.0 * TERRAIN_HORIZONTAL_SCALE, 0.4),  
             ],
             // Note: Temperature and humidity need to be broad, so keep scales low!
-            temperature_layer: PerlinLayer::new(seed + 400, 0.03, 1.0),
-            humidity_layer: PerlinLayer::new(seed + 500, 0.03, 1.0),
+            temperature_layer: PerlinLayer::new(seed + 400, 0.08 * TERRAIN_HORIZONTAL_SCALE, 1.0),
+            humidity_layer: PerlinLayer::new(seed + 500, 0.08 * TERRAIN_HORIZONTAL_SCALE, 1.0),
         }
     }
 
@@ -144,6 +144,21 @@ impl WorldGenerator {
             }
         }
     }
+
+    pub fn get_terrain_height(&self, pos: &[f32; 3]) -> f32 {
+        let mut base_height = 0.0;
+        let (temp, humidity) = self.get_climate(pos);
+
+        for layer in &self.terrain_layers {
+            base_height += layer.get_level(pos);
+        }
+
+        let height_multiplier = get_biome_height_multiplier(temp, humidity);
+        let elevation_offset = get_biome_elevation_offset(temp, humidity);
+
+        let final_height = base_height * height_multiplier + elevation_offset;
+        final_height * MAP_HEIGHT_SCALE
+    }
 }
 
 #[derive(Resource, Clone)]
@@ -175,11 +190,11 @@ impl PerlinLayer {
     }
 }
 fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
-    let desert_elev = 1.0;    
-    let grass_elev = 1.0;     
-    let forest_elev = 2.0;    
-    let taiga_elev = 3.0;     
-    let ocean_elev = -2.5; // Deep negative offset
+    let desert_elev = 0.01;    
+    let grass_elev = 0.3;     
+    let forest_elev = 0.5;    
+    let taiga_elev = 8.0;     
+    let ocean_elev = -3.5; // Deep negative offset
 
     // 1. Blend humidity
     let cold_blend = grass_elev + (taiga_elev - grass_elev) * humidity;
@@ -196,11 +211,11 @@ fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
 }
 
 fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
-    let desert_mult = 0.25;
-    let grass_mult = 0.2;
-    let forest_mult = 0.25;
-    let taiga_mult = 2.3;
-    let ocean_mult = 0.05; // Oceans are relatively flat at the bottom
+    let desert_mult = 0.005;
+    let grass_mult = 0.01;
+    let forest_mult = 0.05;
+    let taiga_mult = 1.5;
+    let ocean_mult = 0.5; // Oceans are relatively flat at the bottom
 
     let cold_blend = grass_mult + (taiga_mult - grass_mult) * humidity;
     let hot_blend = desert_mult + (forest_mult - desert_mult) * humidity;

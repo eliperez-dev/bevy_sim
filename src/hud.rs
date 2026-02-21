@@ -27,6 +27,25 @@ pub fn flight_hud_system(
     let ctx = contexts.ctx_mut().unwrap();
     let window_frame = Frame::default().fill(bevy_egui::egui::Color32::from_rgba_unmultiplied(50, 50, 50, 100));
     
+    // Display crash warning
+    if aircraft.crashed {
+        egui::Window::new("Crash")
+            .title_bar(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .fixed_size([300.0, 100.0])
+            .frame(Frame::default().fill(egui::Color32::from_rgba_unmultiplied(200, 0, 0, 200)))
+            .show(ctx, |ui| {
+                ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.label(egui::RichText::new("⚠ AIRCRAFT CRASHED ⚠").size(24.0).strong());
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("Press R to respawn").size(14.0));
+                });
+            });
+    }
+    
     egui::Window::new("Attitude")
         .title_bar(false)
         .resizable(false)

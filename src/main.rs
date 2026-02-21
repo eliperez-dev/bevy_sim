@@ -73,7 +73,7 @@ fn main() {
             lod_to_update: Vec::new(),
             render_distance: 40,
             lod_levels: [
-                (0.70, 25),
+                (0.70, 20),
                 (1.25, 15),
                 (2.0, 8),
                 (3.0, 3),
@@ -146,7 +146,12 @@ fn setup(
 ) {
     let cascade_shadow_config = CascadeShadowConfigBuilder::default().build();
 
-    commands.insert_resource(WorldGenerator::new(rand::random::<u32>()));
+    let world_gen = WorldGenerator::new(rand::random::<u32>());
+    let spawn_pos = [0.0, 0.0, 0.0];
+    let terrain_height = world_gen.get_terrain_height(&spawn_pos);
+    let spawn_height = (terrain_height + RESPAWN_HEIGHT).max(RESPAWN_HEIGHT);
+    
+    commands.insert_resource(world_gen);
     
     commands.insert_resource(SharedChunkMaterials {
         terrain_material: materials.add(StandardMaterial {
@@ -188,7 +193,7 @@ fn setup(
 
     let plane_entity = commands.spawn((
         Aircraft::default(),
-        Transform::from_xyz(0.0, SPAWN_HEIGHT, 0.0).with_scale(Vec3::splat(0.1)),
+        Transform::from_xyz(0.0, spawn_height, 0.0).with_scale(Vec3::splat(0.1)),
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();
@@ -227,7 +232,7 @@ fn setup_camera_fog(mut commands: Commands) {
             directional_light_color: Color::srgba(1.0, 0.95, 0.85, 0.1), 
             directional_light_exponent: 1000.0, 
             falloff: FogFalloff::ExponentialSquared{ 
-                density: 0.000040, 
+                density: 0.000045, 
             },
         }, 
         AmbientLight {

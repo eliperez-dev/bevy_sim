@@ -4,6 +4,9 @@ use bevy::{
 };
 use noise::{NoiseFn, Perlin};
 
+use crate::world_generation::WorldGenerator;
+use crate::consts::RESPAWN_HEIGHT;
+
 // Constants for physics calculations
 const BASE_THRUST_MULTIPLIER: f32 = 50.0;
 const THRUST_HEADROOM: f32 = 0.2;
@@ -90,6 +93,7 @@ pub struct Aircraft {
     pub pitch_velocity: f32,
     pub roll_velocity: f32,
     pub yaw_velocity: f32,
+    pub crashed: bool,
 
     // Physics tuning parameters
     pub max_speed: f32,
@@ -122,6 +126,7 @@ impl Default for Aircraft {
             pitch_velocity: 0.0,
             roll_velocity: 0.0,
             yaw_velocity: 0.0,
+            crashed: false,
             max_speed: 450.0,
             max_throttle: 1.5,
             thrust: 1.5,
@@ -195,6 +200,9 @@ fn handle_input_toggles(
     keyboard: &ButtonInput<KeyCode>,
     wire_frame: &mut WireframeConfig,
     control_mode: &mut ControlMode,
+    aircraft: Option<&mut Aircraft>,
+    plane_transform: Option<&mut Transform>,
+    world_gen: Option<&WorldGenerator>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyF) {
         control_mode.mode = match control_mode.mode {
@@ -210,6 +218,30 @@ fn handle_input_toggles(
     if keyboard.just_pressed(KeyCode::KeyP) {
         control_mode.physics_paused = !control_mode.physics_paused;
         info!("Physics {}", if control_mode.physics_paused { "paused" } else { "resumed" });
+    }
+    if keyboard.just_pressed(KeyCode::KeyR) {
+        if let Some(aircraft) = aircraft {
+            if aircraft.crashed {
+                if let (Some(transform), Some(world_gen)) = (plane_transform, world_gen) {
+                    let current_pos = transform.translation;
+                    let terrain_height = world_gen.get_terrain_height(&[current_pos.x, current_pos.y, current_pos.z]);
+                    
+                    aircraft.crashed = false;
+                    aircraft.speed = 150.0;
+                    aircraft.throttle = 0.8;
+                    aircraft.velocity = Vec3::ZERO;
+                    aircraft.pitch_velocity = 0.0;
+                    aircraft.roll_velocity = 0.0;
+                    aircraft.yaw_velocity = 0.0;
+                    control_mode.physics_paused = false;
+                    
+                    transform.translation.y = (terrain_height + RESPAWN_HEIGHT).max(RESPAWN_HEIGHT);
+                    transform.rotation = Quat::IDENTITY;
+                    
+                    info!("Aircraft respawned");
+                }
+            }
+        }
     }
 }
 
@@ -563,12 +595,18 @@ pub fn camera_controls(
     mut wire_frame: ResMut<WireframeConfig>,
     mut control_mode: ResMut<ControlMode>,
     wind: Res<Wind>,
+    world_gen: Res<WorldGenerator>,
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
     mut aircraft_query: Query<(&mut Transform, &mut Aircraft), (With<Aircraft>, Without<MainCamera>)>,
 ) {
     let dt = time.delta_secs();
 
-    handle_input_toggles(&keyboard, &mut wire_frame, &mut control_mode);
+    // Handle input toggles first - need special handling for respawn
+    if let Ok((mut plane_transform, mut aircraft)) = aircraft_query.single_mut() {
+        handle_input_toggles(&keyboard, &mut wire_frame, &mut control_mode, Some(&mut aircraft), Some(&mut plane_transform), Some(&world_gen));
+    } else {
+        handle_input_toggles(&keyboard, &mut wire_frame, &mut control_mode, None, None, None);
+    }
 
     // Aircraft physics
     if !control_mode.physics_paused {
@@ -638,6 +676,33 @@ pub fn camera_controls(
                 turbulence.turbulence_velocity_scale, 
                 dt
             );
+
+            // Terrain and water collision detection
+            let aircraft_pos = plane_transform.translation;
+            let terrain_height = world_gen.get_terrain_height(&[aircraft_pos.x, aircraft_pos.y, aircraft_pos.z]);
+            
+            if (aircraft_pos.y <= terrain_height || aircraft_pos.y <= 0.0) && !aircraft.crashed {
+                aircraft.crashed = true;
+                aircraft.speed = 0.0;
+                aircraft.velocity = Vec3::ZERO;
+                aircraft.pitch_velocity = 0.0;
+                aircraft.roll_velocity = 0.0;
+                aircraft.yaw_velocity = 0.0;
+                plane_transform.translation.y = terrain_height.max(0.0);
+                control_mode.physics_paused = true;
+                
+                if aircraft_pos.y <= 0.0 {
+                    info!("Aircraft crashed into water at position: [{:.1}, {:.1}, {:.1}]", aircraft_pos.x, aircraft_pos.y, aircraft_pos.z);
+                } else {
+                    info!("Aircraft crashed into terrain at position: [{:.1}, {:.1}, {:.1}]", aircraft_pos.x, aircraft_pos.y, aircraft_pos.z);
+                }
+            }
+
+            // Prevent further movement if crashed
+            if aircraft.crashed {
+                aircraft.speed = 0.0;
+                aircraft.velocity = Vec3::ZERO;
+            }
         }
     }
 
