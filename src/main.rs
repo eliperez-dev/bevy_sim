@@ -204,7 +204,7 @@ fn setup(
 
     let plane_entity = commands.spawn((
         Aircraft::default(),
-        Transform::from_xyz(0.0, spawn_height, 0.0).with_scale(Vec3::splat(0.1)),
+        Transform::from_xyz(0.0, spawn_height, 0.0).with_scale(Vec3::splat(0.15)),
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();

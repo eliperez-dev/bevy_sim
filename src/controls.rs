@@ -32,15 +32,15 @@ const FREE_FLIGHT_ROTATION_SPEED: f32 = 0.7;
 const FREE_FLIGHT_PAN_SPEED_NORMAL: f32 = 200.0;
 const FREE_FLIGHT_PAN_SPEED_FAST: f32 = 1000.0;
 const THROTTLE_CHANGE_RATE: f32 = 0.5;
-const CAMERA_ZOOM_SPEED: f32 = 25.0;
+const CAMERA_ZOOM_SPEED: f32 = 35.0;
 const CAMERA_ZOOM_MIN: f32 = 5.0;
-const CAMERA_ZOOM_MAX: f32 = 150.0;
+const CAMERA_ZOOM_MAX: f32 = 250.0;
 const ORBIT_ROTATION_SPEED: f32 = 2.0;
 const ORBIT_PITCH_MIN: f32 = -0.4;
 const ORBIT_PITCH_MAX: f32 = 1.2;
-const CAMERA_MAX_EXTRA_DISTANCE: f32 = 4.0;
+const CAMERA_MAX_EXTRA_DISTANCE: f32 = 10.0;
 const CAMERA_SPEED_THRESHOLD: f32 = 100.0;
-const CAMERA_HEIGHT: f32 = 7.0;
+const CAMERA_HEIGHT: f32 = 9.0;
 const CAMERA_SMOOTHNESS_BASE: f32 = 2.0;
 const CAMERA_SMOOTHNESS_MULTIPLIER: f32 = 1.5;
 const CAMERA_LOOK_AHEAD_MULTIPLIER: f32 = 0.2;
@@ -79,7 +79,7 @@ impl Default for MainCamera {
         Self {
             orbit_yaw: 0.0,
             orbit_pitch: 0.0,
-            orbit_distance: 18.0,
+            orbit_distance: 15.0,
         }
     }
 }
@@ -131,10 +131,10 @@ impl Default for Aircraft {
             max_throttle: 1.5,
             thrust: 1.5,
             gravity: 80.0,       
-            g_force_drag: 1.2,
+            g_force_drag: 2.5,
             lift_coefficient: 2.5,
             lift_reduction_factor: 30.0,
-            parasitic_drag_coef: 5.0,
+            parasitic_drag_coef: 8.0,
             pitch_strength: 2.0,
             roll_strength: 3.0,
             yaw_strength: 1.0,
