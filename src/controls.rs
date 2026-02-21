@@ -32,15 +32,15 @@ const FREE_FLIGHT_ROTATION_SPEED: f32 = 0.7;
 const FREE_FLIGHT_PAN_SPEED_NORMAL: f32 = 200.0;
 const FREE_FLIGHT_PAN_SPEED_FAST: f32 = 1000.0;
 const THROTTLE_CHANGE_RATE: f32 = 0.5;
-const CAMERA_ZOOM_SPEED: f32 = 35.0;
+const CAMERA_ZOOM_SPEED: f32 = 45.0;
 const CAMERA_ZOOM_MIN: f32 = 5.0;
 const CAMERA_ZOOM_MAX: f32 = 250.0;
 const ORBIT_ROTATION_SPEED: f32 = 2.0;
 const ORBIT_PITCH_MIN: f32 = -0.4;
 const ORBIT_PITCH_MAX: f32 = 1.2;
-const CAMERA_MAX_EXTRA_DISTANCE: f32 = 10.0;
+const CAMERA_MAX_EXTRA_DISTANCE: f32 = 15.0;
 const CAMERA_SPEED_THRESHOLD: f32 = 100.0;
-const CAMERA_HEIGHT: f32 = 9.0;
+const CAMERA_HEIGHT: f32 = 12.0;
 const CAMERA_SMOOTHNESS_BASE: f32 = 2.0;
 const CAMERA_SMOOTHNESS_MULTIPLIER: f32 = 1.5;
 const CAMERA_LOOK_AHEAD_MULTIPLIER: f32 = 0.2;
@@ -128,7 +128,7 @@ impl Default for Aircraft {
             yaw_velocity: 0.0,
             crashed: false,
             max_speed: 350.0,
-            max_throttle: 1.5,
+            max_throttle: 2.0,
             thrust: 1.5,
             gravity: 80.0,       
             g_force_drag: 2.5,

@@ -75,8 +75,9 @@ fn main() {
             to_spawn: Vec::new(),
             lod_to_update: Vec::new(),
             render_distance: 50,
+            tree_render_distance: 12.0,
             lod_levels: [
-                (0.70, 20),
+                (0.70, 25),
                 (1.25, 15),
                 (2.0, 8),
                 (3.0, 3),
@@ -215,7 +216,7 @@ fn setup(
 
     let plane_entity = commands.spawn((
         Aircraft::default(),
-        Transform::from_xyz(0.0, spawn_height, 0.0).with_scale(Vec3::splat(0.15)),
+        Transform::from_xyz(0.0, spawn_height, 0.0).with_scale(Vec3::splat(0.2)),
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();
@@ -377,8 +378,8 @@ fn ui_aircraft_physics(ui: &mut egui::Ui, aircraft: &mut Aircraft) {
     ui.label(egui::RichText::new("Flight Model Tuning").strong());
     
     ui.label("Engine & Drag");
-    ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=1000.0).text("Max Speed"));
-    ui.add(egui::Slider::new(&mut aircraft.thrust, 0.1..=2.0).text("Engine Response"));
+    ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=5000.0).text("Max Speed"));
+    ui.add(egui::Slider::new(&mut aircraft.thrust, 0.1..=3.0).text("Engine Response"));
     ui.add(egui::Slider::new(&mut aircraft.parasitic_drag_coef, 0.0..=50.0).text("Parasitic Drag"));
     ui.add(egui::Slider::new(&mut aircraft.g_force_drag, 0.0..=10.0).text("G-Force Drag"));
     
@@ -455,6 +456,7 @@ fn ui_render_settings(
     if ui.add(egui::Slider::new(&mut chunk_manager.render_distance, 2..=150).text("Render Distance")).changed() {
         render_settings.just_updated = true;
     }
+    ui.add(egui::Slider::new(&mut chunk_manager.tree_render_distance, 1.0..=50.0).text("Tree Render Distance"));
     ui.add(egui::Slider::new(&mut world_settings.max_chunks_per_frame, 1..=500).text("Max Gen / Frame"));
 
     if ui.add(egui::Slider::new(&mut render_settings.cascades, 0..=4).text("Cascades")).changed() {
@@ -520,6 +522,7 @@ pub fn debugger_ui(
                         render_settings.just_updated = true;
                         render_settings.cascades = 0;
                         chunk_manager.lod_distance_multiplier = 10.0;
+                        chunk_manager.tree_render_distance = 12.0;
                         if let Ok(mut fog) = fog_query.single_mut() {
                             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
                                 *density = 0.000045;
@@ -532,6 +535,7 @@ pub fn debugger_ui(
                         render_settings.just_updated = true;
                         render_settings.cascades = 2;
                         chunk_manager.lod_distance_multiplier = 15.0;
+                        chunk_manager.tree_render_distance = 16.0;
                         if let Ok(mut fog) = fog_query.single_mut() {
                             if let FogFalloff::ExponentialSquared { density } = &mut fog.falloff {
                                 *density = 0.000045;

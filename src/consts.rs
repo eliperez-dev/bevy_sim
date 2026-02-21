@@ -15,7 +15,7 @@ pub const TERRAIN_HORIZONTAL_SCALE: f32 = 1.0;
 pub const RESPAWN_HEIGHT: f32 = 500.0;
 
 pub fn world_units_to_meters(world_units: f32) -> f32 {
-    world_units * 0.55817
+    world_units * 0.41967669172
 }
 
 pub struct TerrainStop {

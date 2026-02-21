@@ -6,21 +6,19 @@ use crate::controls::MainCamera;
 use crate::consts::CHUNK_SIZE;
 
 #[derive(Component)]
-pub struct VegetationSpawner {
-    pub spawned: bool,
-}
+pub struct VegetationSpawner;
 
 #[derive(Component)]
 pub struct Tree;
 
 const TREE_DENSITY: f32 = 0.5;
-const TREE_RENDER_DISTANCE: f32 = 13.0;
 const TREE_SPACING_GRID_SIZE: f32 = 270.0;
 
 pub fn spawn_vegetation_for_chunk(
     mut commands: Commands,
     chunks: Query<(Entity, &Chunk, &Transform), (Without<VegetationSpawner>, Without<ChunkTask>)>,
     world_generator: Res<WorldGenerator>,
+    chunk_manager: Res<crate::world_generation::ChunkManager>,
     asset_server: Res<AssetServer>,
     camera: Query<&Transform, With<MainCamera>>,
 ) {
@@ -35,7 +33,7 @@ pub fn spawn_vegetation_for_chunk(
         let dz = (chunk.z - cam_z) as f32;
         let distance = (dx * dx + dz * dz).sqrt();
         
-        if distance > TREE_RENDER_DISTANCE {
+        if distance > chunk_manager.tree_render_distance {
             continue;
         }
         let chunk_world_pos = chunk_transform.translation;
@@ -95,10 +93,22 @@ pub fn spawn_vegetation_for_chunk(
                     continue;
                 }
                 
-                if let Some(model_path) = tree_model {
+                if let Some(mut model_path) = tree_model {
                     let terrain_height = world_generator.get_terrain_height(&world_pos);
                     
                     if terrain_height > 0.0 {
+                        let dead_tree_chance = tree_noise.get([
+                            world_x as f64 * 0.19,
+                            world_z as f64 * 0.19,
+                            555.0
+                        ]) as f32;
+
+                        let is_dead_tree = dead_tree_chance.abs() < 0.04;
+                        
+                        if is_dead_tree {
+                            model_path = "dead_tree.glb#Scene0";
+                        }
+                        
                         let rotation_y = (tree_noise.get([
                             world_x as f64 * 0.33,
                             world_z as f64 * 0.33,
@@ -111,7 +121,8 @@ pub fn spawn_vegetation_for_chunk(
                             123.0
                         ]) as f32 * 0.5 + 0.5) * 1.2;
                         
-                        let scale = base_scale * biome_scale_multiplier;
+                        let scale = base_scale * biome_scale_multiplier * if is_dead_tree && 
+                        (biome == Biome::Taiga || biome == Biome::Forest) { 1.3 } else { 1.0 };
                         
                         let local_x = world_x - chunk_world_pos.x;
                         let local_z = world_z - chunk_world_pos.z;
@@ -140,11 +151,12 @@ pub fn spawn_vegetation_for_chunk(
             }
         });
         
-        commands.entity(chunk_entity).insert(VegetationSpawner { spawned: true });
+        commands.entity(chunk_entity).insert(VegetationSpawner);
     }
 }
 
 pub fn update_tree_lod(
+    chunk_manager: Res<crate::world_generation::ChunkManager>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
     mut trees: Query<(&GlobalTransform, &mut Visibility), With<Tree>>,
 ) {
@@ -155,7 +167,7 @@ pub fn update_tree_lod(
         let tree_pos = tree_transform.translation();
         let distance = cam_pos.distance(tree_pos);
         
-        if distance > TREE_RENDER_DISTANCE * CHUNK_SIZE {
+        if distance > chunk_manager.tree_render_distance * CHUNK_SIZE {
             *visibility = Visibility::Hidden;
         } else {
             *visibility = Visibility::Inherited;

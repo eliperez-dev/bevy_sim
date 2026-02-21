@@ -406,7 +406,7 @@ pub fn spawn_remote_player(
         RemotePlayer { player_id: player_state.id },
         Transform::from_translation(position)
             .with_rotation(rotation)
-            .with_scale(Vec3::splat(0.15)),
+            .with_scale(Vec3::splat(0.2)),
         LerpTarget {
             position,
             last_position: position,
