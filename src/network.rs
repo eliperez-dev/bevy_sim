@@ -294,6 +294,13 @@ pub struct RemotePlayer {
 }
 
 #[derive(Component)]
+pub struct LerpTarget {
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub velocity: Vec3,
+}
+
+#[derive(Component)]
 pub struct PlayerLabel;
 
 #[derive(Component)]
@@ -305,8 +312,8 @@ pub fn spawn_remote_player(
     trigger: On<SpawnRemotePlayer>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    time: Res<Time>,
 ) {
     let player_state = &trigger.0;
     
@@ -318,6 +325,11 @@ pub fn spawn_remote_player(
         Transform::from_translation(position)
             .with_rotation(rotation)
             .with_scale(Vec3::splat(0.1)),
+        LerpTarget {
+            position,
+            rotation,
+            velocity: Vec3::ZERO,
+        },
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();
@@ -361,19 +373,39 @@ pub fn spawn_remote_player(
 
 pub fn update_remote_player(
     trigger: On<UpdateRemotePlayer>,
-    mut query: Query<&mut Transform, With<RemotePlayer>>,
+    mut query: Query<&mut LerpTarget, With<RemotePlayer>>,
     remote_players: Query<(Entity, &RemotePlayer)>,
 ) {
     let event = &trigger;
     
     for (entity, remote_player) in remote_players.iter() {
         if remote_player.player_id == event.id {
-            if let Ok(mut transform) = query.get_mut(entity) {
-                transform.translation = Vec3::from(event.position);
-                transform.rotation = Quat::from_array(event.rotation);
+            if let Ok(mut lerp_target) = query.get_mut(entity) {
+                lerp_target.position = Vec3::from(event.position);
+                lerp_target.rotation = Quat::from_array(event.rotation);
             }
             break;
         }
+    }
+}
+
+pub fn lerp_remote_players(
+    mut query: Query<(&mut Transform, &mut LerpTarget), With<RemotePlayer>>,
+    time: Res<Time>,
+) {
+    const SMOOTHING: f32 = 8.0;
+    const ROT_SMOOTHING: f32 = 10.0;
+    
+    for (mut transform, mut lerp_target) in query.iter_mut() {
+        let dt = time.delta_secs();
+        
+        let position_diff = lerp_target.position - transform.translation;
+        lerp_target.velocity += position_diff * SMOOTHING * dt;
+        lerp_target.velocity *= 0.85_f32.powf(dt * 60.0);
+        
+        transform.translation += lerp_target.velocity;
+        
+        transform.rotation = transform.rotation.slerp(lerp_target.rotation, 1.0 - 0.01_f32.powf(dt * ROT_SMOOTHING));
     }
 }
 
