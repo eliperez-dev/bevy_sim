@@ -91,7 +91,7 @@ pub async fn connect_to_server(address: &str) -> Result<NetworkClient, String> {
     TOKIO_RUNTIME.spawn(async move {
         let mut write_half = write_half;
         while let Some(message) = send_rx.recv().await {
-            println!("Client sending message: {:?}", message);
+            //println!("Client sending message: {:?}", message);
             if let Err(e) = send_message(&mut write_half, &message).await {
                 eprintln!("Failed to send message: {}", e);
                 break;
@@ -107,7 +107,7 @@ pub async fn connect_to_server(address: &str) -> Result<NetworkClient, String> {
         loop {
             match receive_message(&mut read_half).await {
                 Ok(Some(message)) => {
-                    println!("Client received message: {:?}", message);
+                    //println!("Client received message: {:?}", message);
                     if recv_tx_clone.send(message).is_err() {
                         break;
                     }
