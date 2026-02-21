@@ -103,9 +103,10 @@ fn main() {
         .add_observer(network::spawn_remote_player)
         .add_observer(network::update_remote_player)
         .add_observer(network::despawn_remote_player)
+        .add_observer(network::teleport_to_player)
         .add_systems(Startup, setup_camera_system)
-        .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system, hud::multiplayer_menu_ui))
-        .add_systems(Startup, (setup, setup_camera_fog, spawn_stars).chain())
+        .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
+        .add_systems(Startup, (setup, setup_camera_fog, spawn_stars, hud::auto_connect_on_startup).chain())
         .add_systems(Update, (
             evolve_wind,
             camera_controls, 
@@ -475,6 +476,10 @@ pub fn debugger_ui(
     mut render_settings: ResMut<RenderSettings>,
     mut aircraft_query: Query<&mut Aircraft, Without<MainCamera>>,
     mut wind: ResMut<Wind>,
+    client: Option<Res<network::NetworkClient>>,
+    remote_players: Query<(&network::RemotePlayer, &GlobalTransform)>,
+    mut commands: Commands,
+    mut menu: ResMut<hud::MultiplayerMenu>,
 ) -> Result<(), > { 
     egui::Window::new("Simulation Debugger").show(contexts.ctx_mut()?, |ui| {
 
@@ -503,6 +508,103 @@ pub fn debugger_ui(
                 &mut render_settings, 
                 &mut fog_query
             );
+        });
+
+        ui.collapsing("🌐 Multiplayer", |ui| {
+            if let Some(client) = &client {
+                if client.connected {
+                    ui.label(format!("🟢 Connected (Player ID: {})", client.player_id.unwrap_or(0)));
+                    
+                    if let Some(seed) = client.world_seed {
+                        ui.label(format!("World Seed: {}", seed));
+                    }
+                    
+                    ui.separator();
+                    ui.label(egui::RichText::new("Remote Players").strong());
+                    
+                    if remote_players.is_empty() {
+                        ui.label("No other players connected");
+                    } else {
+                        for (remote_player, transform) in remote_players.iter() {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Player {}", remote_player.player_id));
+                                if ui.button("Teleport").clicked() {
+                                    commands.trigger(network::TeleportToPlayer {
+                                        player_id: remote_player.player_id,
+                                        position: transform.translation().into(),
+                                        rotation: transform.to_scale_rotation_translation().1.into(),
+                                    });
+                                }
+                            });
+                        }
+                    }
+                    
+                    ui.separator();
+                    
+                    if ui.button("Disconnect").clicked() {
+                        commands.remove_resource::<network::NetworkClient>();
+                        menu.connection_status = "Disconnected".to_string();
+                    }
+                } else {
+                    ui.label("🔴 Not Connected");
+                    ui.separator();
+                    
+                    ui.label("Server Address:");
+                    ui.text_edit_singleline(&mut menu.server_address);
+                    
+                    ui.add_space(5.0);
+                    
+                    if menu.connecting {
+                        ui.label("Connecting...");
+                    } else if ui.button("Connect").clicked() {
+                        let address = menu.server_address.clone();
+                        menu.connecting = true;
+                        menu.connection_status.clear();
+                        
+                        let (tx, rx) = crossbeam_channel::unbounded();
+                        menu.connection_receiver = Some(rx);
+                        
+                        std::thread::spawn(move || {
+                            let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address));
+                            let _ = tx.send(result);
+                        });
+                    }
+                    
+                    if !menu.connection_status.is_empty() {
+                        ui.separator();
+                        ui.colored_label(egui::Color32::RED, &menu.connection_status);
+                    }
+                }
+            } else {
+                ui.label("🔴 Not Connected");
+                ui.separator();
+                
+                ui.label("Server Address:");
+                ui.text_edit_singleline(&mut menu.server_address);
+                
+                ui.add_space(5.0);
+                
+                if menu.connecting {
+                    ui.label("Connecting...");
+                } else if ui.button("Connect").clicked() {
+                    let address = menu.server_address.clone();
+                    menu.connecting = true;
+                    menu.connection_status.clear();
+                    
+                    let (tx, rx) = crossbeam_channel::unbounded();
+                    menu.connection_receiver = Some(rx);
+                    
+                    std::thread::spawn(move || {
+                        let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address));
+                        let _ = tx.send(result);
+                    });
+                }
+                
+                if !menu.connection_status.is_empty() {
+                    ui.separator();
+                    ui.colored_label(egui::Color32::RED, &menu.connection_status);
+                }
+            }
         });
         
         ui.separator();

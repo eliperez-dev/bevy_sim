@@ -294,7 +294,11 @@ pub fn modify_plane(
                 mesh_clone
             });
 
-            commands.entity(entity).insert(ChunkTask { task, new_handle: None });
+            commands.queue(move |world: &mut World| {
+                if let Ok(mut entity) = world.get_entity_mut(entity) {
+                    entity.insert(ChunkTask { task, new_handle: None });
+                }
+            });
         }
     }
 }
@@ -335,14 +339,14 @@ pub fn handle_compute_tasks(
                     if let Some(mesh) = meshes.get_mut(&new_handle) {
                         *mesh = new_mesh;
                     }
-                    commands.entity(entity).insert(Mesh3d(new_handle));
+                    commands.entity(entity).try_insert(Mesh3d(new_handle));
                     meshes.remove(mesh_handle);
                 } else if let Some(mesh) = meshes.get_mut(mesh_handle) {
                     *mesh = new_mesh;
                 }
 
                 commands.entity(entity).remove::<ChunkTask>();
-                commands.entity(entity).insert(Visibility::Visible);
+                commands.entity(entity).try_insert(Visibility::Visible);
                 processed_count += 1;
             }
     }
@@ -611,7 +615,11 @@ pub fn update_chunk_lod(
                     mesh_clone
                 });
 
-                commands.entity(entity).insert(ChunkTask { task, new_handle: Some(new_mesh_handle) });
+                commands.queue(move |world: &mut World| {
+                    if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
+                        entity_mut.insert(ChunkTask { task, new_handle: Some(new_mesh_handle) });
+                    }
+                });
                 
                 // Finalize the chunk's LOD state
                 if let Ok((_, mut chunk, _, _, _children)) = chunks.get_mut(entity) {
@@ -652,8 +660,10 @@ pub fn despawn_out_of_bounds_chunks(
     chunks_to_despawn.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
 
     for (entity, x, z, _) in chunks_to_despawn.iter().take(settings.max_chunks_per_frame * 2) {
-        commands.entity(*entity).despawn();
-        chunk_manager.spawned_chunks.remove(&(*x, *z));
+        if let Ok(mut entity_commands) = commands.get_entity(*entity) {
+            entity_commands.despawn();
+            chunk_manager.spawned_chunks.remove(&(*x, *z));
+        }
     }
 }
 

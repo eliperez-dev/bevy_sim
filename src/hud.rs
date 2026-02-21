@@ -720,7 +720,6 @@ fn draw_throttle_gauge(ui: &mut egui::Ui, throttle: f32, max_throttle: f32, spee
 
 #[derive(Resource)]
 pub struct MultiplayerMenu {
-    pub show: bool,
     pub server_address: String,
     pub connection_status: String,
     pub connecting: bool,
@@ -730,7 +729,6 @@ pub struct MultiplayerMenu {
 impl Default for MultiplayerMenu {
     fn default() -> Self {
         Self {
-            show: false,
             server_address: DEFAULT_SERVER_ADDR.to_string(),
             connection_status: String::new(),
             connecting: false,
@@ -739,82 +737,23 @@ impl Default for MultiplayerMenu {
     }
 }
 
-pub fn multiplayer_menu_ui(
-    mut contexts: EguiContexts,
+pub fn auto_connect_on_startup(
     mut menu: ResMut<MultiplayerMenu>,
-    mut commands: Commands,
-    client: Option<ResMut<NetworkClient>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyM) {
-        menu.show = !menu.show;
-    }
-
-    if !menu.show {
-        return;
-    }
-
-    let ctx = contexts.ctx_mut().unwrap();
+    let address = DEFAULT_SERVER_ADDR.to_string();
+    menu.connecting = true;
+    menu.connection_status = "Auto-connecting...".to_string();
     
-    egui::Window::new("Multiplayer")
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .collapsible(false)
-        .show(ctx, |ui| {
-            ui.heading("Multiplayer Settings");
-            ui.separator();
-
-            if let Some(client) = &client {
-                if client.connected {
-                    ui.label(format!("🟢 Connected (Player ID: {})", client.player_id.unwrap_or(0)));
-                    
-                    if let Some(seed) = client.world_seed {
-                        ui.label(format!("World Seed: {}", seed));
-                    }
-                    
-                    ui.separator();
-                    
-                    if ui.button("Disconnect").clicked() {
-                        commands.remove_resource::<NetworkClient>();
-                        menu.connection_status = "Disconnected".to_string();
-                    }
-                } else {
-                    ui.label("🔴 Not Connected");
-                }
-            } else {
-                ui.label("🔴 Not Connected");
-                ui.separator();
-                
-                ui.label("Server Address:");
-                ui.text_edit_singleline(&mut menu.server_address);
-                
-                ui.add_space(10.0);
-                
-                if menu.connecting {
-                    ui.label("Connecting...");
-                } else if ui.button("Connect").clicked() {
-                    let address = menu.server_address.clone();
-                    menu.connecting = true;
-                    menu.connection_status.clear();
-                    
-                    let (tx, rx) = crossbeam_channel::unbounded();
-                    menu.connection_receiver = Some(rx);
-                    
-                    std::thread::spawn(move || {
-                        let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address));
-                        let _ = tx.send(result);
-                    });
-                }
-                
-                if !menu.connection_status.is_empty() {
-                    ui.separator();
-                    ui.colored_label(egui::Color32::RED, &menu.connection_status);
-                }
-            }
-            
-            ui.separator();
-            ui.label("Press M to toggle this menu");
-        });
+    let (tx, rx) = crossbeam_channel::unbounded();
+    menu.connection_receiver = Some(rx);
+    
+    let value = address.clone();
+    std::thread::spawn(move || {
+        let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&value));
+        let _ = tx.send(result);
+    });
+    
+    println!("🌐 Attempting auto-connect to {}", address);
 }
 
 pub fn process_connection_results(

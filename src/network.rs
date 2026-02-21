@@ -228,8 +228,10 @@ pub fn receive_server_messages(
                         
                         // Despawn all existing chunks
                         for (entity, chunk) in chunks.iter() {
-                            commands.entity(entity).despawn();
-                            chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                            if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                                entity_commands.despawn();
+                                chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                            }
                         }
                         
                         println!("🔄 Regenerating world with seed {}", seed);
@@ -278,6 +280,13 @@ pub struct UpdateRemotePlayer {
 
 #[derive(Event)]
 pub struct DespawnRemotePlayer(pub u32);
+
+#[derive(Event)]
+pub struct TeleportToPlayer {
+    pub player_id: u32,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+}
 
 #[derive(Component)]
 pub struct RemotePlayer {
@@ -413,5 +422,18 @@ pub fn update_player_labels(
                 break;
             }
         }
+    }
+}
+
+pub fn teleport_to_player(
+    trigger: On<TeleportToPlayer>,
+    mut aircraft_query: Query<&mut Transform, With<crate::controls::Aircraft>>,
+) {
+    let event = &trigger;
+    
+    if let Ok(mut transform) = aircraft_query.single_mut() {
+        transform.translation = Vec3::from(event.position);
+        transform.rotation = Quat::from_array(event.rotation);
+        println!("Teleported to Player {}", event.player_id);
     }
 }
