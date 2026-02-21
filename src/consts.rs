@@ -1,7 +1,10 @@
-
 use bevy::prelude::Color;
 
-pub const OCEAN_THRESHOLD: f32 = 0.55;
+pub const OCEAN_HUMIDITY_THRESHOLD: f32 = 0.70;
+pub const OCEAN_HUMIDITY_OFFSET: f32 = 0.1;
+pub const OCEAN_HOT_TEMP_THRESHOLD: f32 = 0.9;
+pub const OCEAN_COLD_TEMP_THRESHOLD: f32 = 0.0;
+pub const OCEAN_TRANSITION_WIDTH: f32 = 0.3;
 
 pub const CHUNK_SIZE: f32 = 1000.0; 
 pub const MAP_HEIGHT_SCALE: f32 = 500.0;

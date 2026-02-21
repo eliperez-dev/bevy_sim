@@ -80,9 +80,9 @@ pub fn spawn_vegetation_for_chunk(
                 let biome = world_generator.get_biome(&world_pos);
                 
                 let (tree_model, biome_scale_multiplier, biome_density) = match biome {
-                    Biome::Forest => (Some("pine.glb#Scene0"), 0.8, TREE_DENSITY),
-                    Biome::Taiga => (Some("pine.glb#Scene0"), 1.4, TREE_DENSITY),
-                    Biome::Grasslands => (Some("oak.glb#Scene0"), 1.0, TREE_DENSITY * 1.60),
+                    Biome::Forest => (Some("pine.glb#Scene0"), 0.7, TREE_DENSITY * 1.2),
+                    Biome::Taiga => (Some("pine.glb#Scene0"), 1.2, TREE_DENSITY),
+                    Biome::Grasslands => (Some("oak.glb#Scene0"), 0.8, TREE_DENSITY * 1.4),
                     _ => (None, 1.0, TREE_DENSITY),
                 };
                 

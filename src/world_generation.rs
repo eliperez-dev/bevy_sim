@@ -98,8 +98,8 @@ impl WorldGenerator {
                 PerlinLayer::new(seed + 300, 2.0 * TERRAIN_HORIZONTAL_SCALE, 0.4),  
             ],
             // Note: Temperature and humidity need to be broad, so keep scales low!
-            temperature_layer: PerlinLayer::new(seed + 400, 0.08 * TERRAIN_HORIZONTAL_SCALE, 1.0),
-            humidity_layer: PerlinLayer::new(seed + 500, 0.08 * TERRAIN_HORIZONTAL_SCALE, 1.0),
+            temperature_layer: PerlinLayer::new(seed + 400, 0.06 * TERRAIN_HORIZONTAL_SCALE, 1.0),
+            humidity_layer: PerlinLayer::new(seed + 500, 0.06 * TERRAIN_HORIZONTAL_SCALE, 1.0),
         }
     }
 
@@ -124,8 +124,10 @@ impl WorldGenerator {
         let temp_normalized = ((raw_temp / self.temperature_layer.vertical_scale) + 1.0) * 0.5;
         let hum_normalized = ((raw_hum / self.humidity_layer.vertical_scale) + 1.0) * 0.5;
 
-        // If it's extremely wet, call it Ocean regardless of temp
-        if hum_normalized > OCEAN_THRESHOLD + 0.05 {
+        // Ocean appears in wet areas OR extreme temperatures
+        if hum_normalized > OCEAN_HUMIDITY_THRESHOLD + OCEAN_HUMIDITY_OFFSET
+            || temp_normalized > OCEAN_HOT_TEMP_THRESHOLD
+            || temp_normalized < OCEAN_COLD_TEMP_THRESHOLD {
             return Biome::Ocean;
         }
 
@@ -139,7 +141,7 @@ impl WorldGenerator {
             }
         } else { 
             // Cold climates
-            if hum_normalized < OCEAN_THRESHOLD / 2.0 { 
+            if hum_normalized < 0.45 { 
                 Biome::Grasslands
             } else { 
                 Biome::Taiga
@@ -192,43 +194,65 @@ impl PerlinLayer {
     }
 }
 fn get_biome_elevation_offset(temp: f32, humidity: f32) -> f32 {
-    let desert_elev = 0.01;    
-    let grass_elev = 0.3;     
+    let desert_elev = 0.0;    
+    let grass_elev = 0.04;     
     let forest_elev = 0.5;    
     let taiga_elev = 8.0;     
-    let ocean_elev = -3.5; // Deep negative offset
+    let ocean_elev = -2.5; // Deep negative offset
 
-    // 1. Blend humidity
+    // 1. Calculate land elevation
     let cold_blend = grass_elev + (taiga_elev - grass_elev) * humidity;
     let hot_blend = desert_elev + (forest_elev - desert_elev) * humidity;
-    let base_land_elev = cold_blend + (hot_blend - cold_blend) * temp;
+    let land_elev = cold_blend + (hot_blend - cold_blend) * temp;
 
-    // 2. Blend toward ocean if humidity is high (0.7 -> 1.0 range)
-    if humidity > OCEAN_THRESHOLD {
-        let t = ((humidity - OCEAN_THRESHOLD) / 0.3).clamp(0.0, 1.0);
-        base_land_elev + (ocean_elev - base_land_elev) * t
-    } else {
-        base_land_elev
-    }
+    // 2. Calculate how much this should blend toward ocean (0.0 = land, 1.0 = ocean)
+    let hum_blend = if humidity > OCEAN_HUMIDITY_THRESHOLD {
+        ((humidity - OCEAN_HUMIDITY_THRESHOLD) / OCEAN_TRANSITION_WIDTH).clamp(0.0, 1.0)
+    } else { 0.0 };
+    
+    let hot_blend = if temp > OCEAN_HOT_TEMP_THRESHOLD - OCEAN_TRANSITION_WIDTH {
+        ((temp - (OCEAN_HOT_TEMP_THRESHOLD - OCEAN_TRANSITION_WIDTH)) / OCEAN_TRANSITION_WIDTH).clamp(0.0, 1.0)
+    } else { 0.0 };
+    
+    let cold_blend = if temp < OCEAN_COLD_TEMP_THRESHOLD + OCEAN_TRANSITION_WIDTH {
+        ((OCEAN_COLD_TEMP_THRESHOLD + OCEAN_TRANSITION_WIDTH - temp) / OCEAN_TRANSITION_WIDTH).clamp(0.0, 1.0)
+    } else { 0.0 };
+    
+    let ocean_factor = hum_blend.max(hot_blend).max(cold_blend);
+    
+    // 3. Blend between land and ocean
+    land_elev + (ocean_elev - land_elev) * ocean_factor
 }
 
 fn get_biome_height_multiplier(temp: f32, humidity: f32) -> f32 {
-    let desert_mult = 0.005;
-    let grass_mult = 0.01;
+    let desert_mult = 0.01;
+    let grass_mult = 0.02;
     let forest_mult = 0.05;
     let taiga_mult = 1.5;
-    let ocean_mult = 0.5; // Oceans are relatively flat at the bottom
+    let ocean_mult = 0.01; // Oceans are flat
 
+    // 1. Calculate land multiplier
     let cold_blend = grass_mult + (taiga_mult - grass_mult) * humidity;
     let hot_blend = desert_mult + (forest_mult - desert_mult) * humidity;
-    let base_land_mult = cold_blend + (hot_blend - cold_blend) * temp;
+    let land_mult = cold_blend + (hot_blend - cold_blend) * temp;
 
-    if humidity > 0.7 {
-        let t = ((humidity - 0.7) / 0.3).clamp(0.0, 1.0);
-        base_land_mult + (ocean_mult - base_land_mult) * t
-    } else {
-        base_land_mult
-    }
+    // 2. Calculate how much this should blend toward ocean (0.0 = land, 1.0 = ocean)
+    let hum_blend = if humidity > OCEAN_HUMIDITY_THRESHOLD {
+        ((humidity - OCEAN_HUMIDITY_THRESHOLD) / OCEAN_TRANSITION_WIDTH).clamp(0.0, 1.0)
+    } else { 0.0 };
+    
+    let hot_blend = if temp > OCEAN_HOT_TEMP_THRESHOLD - OCEAN_TRANSITION_WIDTH {
+        ((temp - (OCEAN_HOT_TEMP_THRESHOLD - OCEAN_TRANSITION_WIDTH)) / OCEAN_TRANSITION_WIDTH).clamp(0.0, 1.0)
+    } else { 0.0 };
+    
+    let cold_blend = if temp < OCEAN_COLD_TEMP_THRESHOLD + OCEAN_TRANSITION_WIDTH {
+        ((OCEAN_COLD_TEMP_THRESHOLD + OCEAN_TRANSITION_WIDTH - temp) / OCEAN_TRANSITION_WIDTH).clamp(0.0, 1.0)
+    } else { 0.0 };
+    
+    let ocean_factor = hum_blend.max(hot_blend).max(cold_blend);
+    
+    // 3. Blend between land and ocean
+    land_mult + (ocean_mult - land_mult) * ocean_factor
 }
 
 #[derive(Component)]
