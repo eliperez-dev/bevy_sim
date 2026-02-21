@@ -11,7 +11,7 @@ pub static TOKIO_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 });
 
 pub const DEFAULT_SERVER_PORT: u16 = 7878;
-pub const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:7878";
+pub const DEFAULT_SERVER_ADDR: &str = "192.168.0.184:7878";
 const MAX_MESSAGE_SIZE: usize = 4096;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
