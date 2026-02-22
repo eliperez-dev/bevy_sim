@@ -172,8 +172,10 @@ fn calculate_pitch(forward: Vec3) -> f32 {
 }
 
 fn calculate_roll(transform: &Transform) -> f32 {
-    let right = transform.right();
-    f32::atan2(right.y, right.x.hypot(right.z)).to_degrees()
+    let up = transform.up().as_vec3();
+    let right = transform.right().as_vec3();
+    
+    f32::atan2(right.y, up.y).to_degrees()
 }
 
 fn calculate_wind_heading(wind: &Wind) -> f32 {
@@ -321,12 +323,6 @@ fn draw_artificial_horizon(ui: &mut egui::Ui, pitch: f32, roll: f32) {
         let sky_color = egui::Color32::from_rgb(50, 120, 200);
         let ground_color = egui::Color32::from_rgb(100, 70, 40);
         
-        painter.circle_filled(
-            center,
-            radius,
-            sky_color,
-        );
-        
         let pitch_offset = -(pitch / 90.0) * radius;
         let roll_rad = roll.to_radians();
         let cos_roll = roll_rad.cos();
@@ -339,13 +335,16 @@ fn draw_artificial_horizon(ui: &mut egui::Ui, pitch: f32, roll: f32) {
             )
         };
         
-        let horizon_left = rotate_point(-radius * 2.0, -pitch_offset);
-        let horizon_right = rotate_point(radius * 2.0, -pitch_offset);
-        let bottom_left = rotate_point(-radius * 2.0, radius * 2.0);
-        let bottom_right = rotate_point(radius * 2.0, radius * 2.0);
+        painter.circle_filled(center, radius + 1.0, sky_color);
+        
+        let large_dist = radius * 3.0;
+        let horizon_left = rotate_point(-large_dist, -pitch_offset);
+        let horizon_right = rotate_point(large_dist, -pitch_offset);
+        let ground_bottom_left = rotate_point(-large_dist, -pitch_offset + large_dist);
+        let ground_bottom_right = rotate_point(large_dist, -pitch_offset + large_dist);
         
         painter.add(egui::Shape::convex_polygon(
-            vec![horizon_left, horizon_right, bottom_right, bottom_left],
+            vec![horizon_left, horizon_right, ground_bottom_right, ground_bottom_left],
             ground_color,
             egui::Stroke::NONE,
         ));

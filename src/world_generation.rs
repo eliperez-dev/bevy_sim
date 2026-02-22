@@ -371,7 +371,7 @@ pub fn handle_compute_tasks(
                     *mesh = new_mesh;
                 }
 
-                commands.entity(entity).remove::<ChunkTask>();
+                commands.entity(entity).try_remove::<ChunkTask>();
                 commands.entity(entity).try_insert(Visibility::Visible);
                 processed_count += 1;
             }
