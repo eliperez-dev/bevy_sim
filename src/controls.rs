@@ -28,17 +28,17 @@ const AUTO_LEVEL_PITCH_DIVISOR: f32 = 1.25;
 
 // Camera control constants
 const FREE_FLIGHT_ROTATION_SPEED: f32 = 0.7;
-const FREE_FLIGHT_PAN_SPEED_NORMAL: f32 = 200.0;
-const FREE_FLIGHT_PAN_SPEED_FAST: f32 = 1000.0;
+const FREE_FLIGHT_PAN_SPEED_NORMAL: f32 = 500.0;
+const FREE_FLIGHT_PAN_SPEED_FAST: f32 = 3000.0;
 const THROTTLE_CHANGE_RATE: f32 = 0.5;
-const CAMERA_ZOOM_SPEED: f32 = 45.0;
-const CAMERA_ZOOM_MIN: f32 = 5.0;
+const CAMERA_ZOOM_SPEED: f32 = 10.0;
+const CAMERA_ZOOM_MIN: f32 = 1.0;
 const CAMERA_ZOOM_MAX: f32 = 250.0;
-const ORBIT_ROTATION_SPEED: f32 = 2.0;
+const ORBIT_ROTATION_SPEED: f32 = 2.5;
 const ORBIT_PITCH_MIN: f32 = -0.4;
 const ORBIT_PITCH_MAX: f32 = 1.2;
-const CAMERA_MAX_EXTRA_DISTANCE: f32 = 15.0;
-const CAMERA_SPEED_THRESHOLD: f32 = 100.0;
+const CAMERA_MAX_EXTRA_DISTANCE: f32 = 30.0;
+const CAMERA_SPEED_THRESHOLD: f32 = 200.0;
 const CAMERA_SMOOTHNESS_BASE: f32 = 2.0;
 const CAMERA_SMOOTHNESS_MULTIPLIER: f32 = 1.5;
 const CAMERA_LOOK_AHEAD_MULTIPLIER: f32 = 0.2;
@@ -135,13 +135,13 @@ impl Aircraft {
     pub fn light() -> Self {
         Self {
             velocity: Vec3::ZERO,
-            speed: 150.0,
+            speed: 250.0,
             throttle: 0.80,
             pitch_velocity: 0.0,
             roll_velocity: 0.0,
             yaw_velocity: 0.0,
             crashed: false,
-            max_speed: 350.0,
+            max_speed: 600.0,
             max_throttle: 2.0,
             thrust: 1.5,
             gravity: 80.0,       
@@ -155,26 +155,26 @@ impl Aircraft {
             bank_turn_strength: 0.85,
             auto_level_strength: 1.00,
             respawn_height: 500.0,
-            respawn_speed: 150.0,
-            camera_height: 12.0,
-            camera_distance: 15.0,
+            respawn_speed: 400.0,
+            camera_height: 24.0,
+            camera_distance: 30.0,
             model_path: "low-poly_airplane/scene.gltf#Scene0".to_string(),
-            model_scale: 0.2,
+            model_scale: 0.4,
         }
     }
 
     pub fn jet() -> Self {
         Self {
             velocity: Vec3::ZERO,
-            speed: 1300.0,
+            speed: 2000.0,
             throttle: 0.80,
             pitch_velocity: 0.0,
             roll_velocity: 0.0,
             yaw_velocity: 0.0,
             crashed: false,
-            max_speed: 1500.0,
-            max_throttle: 2.5,
-            thrust: 4.0,
+            max_speed: 3500.0,
+            max_throttle: 3.5,
+            thrust: 2.5,
             gravity: 80.0,       
             g_force_drag: 2.5,
             lift_coefficient: 2.5,
@@ -186,11 +186,11 @@ impl Aircraft {
             bank_turn_strength: 0.1,
             auto_level_strength: 0.1,
             respawn_height: 1000.0,
-            respawn_speed: 1300.0,
-            camera_height: 12.0,
-            camera_distance: 60.0,
+            respawn_speed: 2000.0,
+            camera_height: 24.0,
+            camera_distance: 120.0,
             model_path: "f16_low_poly/scene.gltf#Scene0".to_string(),
-            model_scale: 15.0,
+            model_scale: 30.0,
         }
     }
 }

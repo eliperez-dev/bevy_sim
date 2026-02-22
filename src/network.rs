@@ -16,17 +16,31 @@ pub const _DEFAULT_SERVER_PORT: u16 = 7878;
 pub const DEFAULT_SERVER_ADDR: &str = "192.168.0.184:7878";
 const MAX_MESSAGE_SIZE: usize = 4096;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaneType {
+    Light,
+    Jet,
+}
+
+impl Default for PlaneType {
+    fn default() -> Self {
+        PlaneType::Light
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
     pub id: u32,
+    pub name: String,
     pub position: [f32; 3],
     pub rotation: [f32; 4],
+    pub plane_type: PlaneType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     Join { name: String },
-    UpdatePosition { position: [f32; 3], rotation: [f32; 4] },
+    UpdatePosition { name: String, position: [f32; 3], rotation: [f32; 4], plane_type: PlaneType },
     Disconnect,
 }
 
@@ -44,8 +58,10 @@ pub enum ServerMessage {
     },
     PlayerUpdate {
         id: u32,
+        name: String,
         position: [f32; 3],
         rotation: [f32; 4],
+        plane_type: PlaneType,
     },
     PlayerLeft {
         id: u32,
@@ -58,6 +74,7 @@ pub enum ServerMessage {
 #[derive(Resource)]
 pub struct NetworkClient {
     pub player_id: Option<u32>,
+    pub player_name: String,
     pub connected: bool,
     pub world_seed: Option<u32>,
     pub original_seed: u32,
@@ -84,7 +101,7 @@ impl NetworkClient {
     }
 }
 
-pub async fn connect_to_server(address: &str) -> Result<NetworkClient, String> {
+pub async fn connect_to_server(address: &str, player_name: String) -> Result<NetworkClient, String> {
     let stream = TcpStream::connect(address)
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
@@ -138,6 +155,7 @@ pub async fn connect_to_server(address: &str) -> Result<NetworkClient, String> {
 
     Ok(NetworkClient {
         player_id: None,
+        player_name,
         connected: true,
         world_seed: None,
         original_seed: 0,
@@ -189,7 +207,7 @@ async fn receive_message(
 
 pub fn send_player_updates(
     client: Option<ResMut<NetworkClient>>,
-    aircraft_query: Query<&Transform, With<crate::controls::Aircraft>>,
+    aircraft_query: Query<(&Transform, &crate::controls::Aircraft)>,
     time: Res<Time>,
     mut last_send: Local<f32>,
 ) {
@@ -204,13 +222,21 @@ pub fn send_player_updates(
     }
     *last_send = time.elapsed_secs();
 
-    if let Some(transform) = aircraft_query.iter().next() {
+    if let Ok((transform, aircraft)) = aircraft_query.single() {
         let position = transform.translation;
         let rotation = transform.rotation;
+        
+        let plane_type = if aircraft.model_path.contains("f16") {
+            PlaneType::Jet
+        } else {
+            PlaneType::Light
+        };
 
         client.send(ClientMessage::UpdatePosition {
+            name: client.player_name.clone(),
             position: [position.x, position.y, position.z],
             rotation: [rotation.x, rotation.y, rotation.z, rotation.w],
+            plane_type,
         });
     }
 }
@@ -325,8 +351,8 @@ pub fn receive_server_messages(
                         println!("Player {} joined", player.id);
                         commands.trigger(SpawnRemotePlayer(player));
                     }
-                    ServerMessage::PlayerUpdate { id, position, rotation } => {
-                        commands.trigger(UpdateRemotePlayer { id, position, rotation });
+                    ServerMessage::PlayerUpdate { id, name, position, rotation, plane_type } => {
+                        commands.trigger(UpdateRemotePlayer { id, name, position, rotation, plane_type });
                     }
                     ServerMessage::PlayerLeft { id } => {
                         println!("Player {} left", id);
@@ -346,8 +372,10 @@ pub struct SpawnRemotePlayer(pub PlayerState);
 #[derive(Event)]
 pub struct UpdateRemotePlayer {
     pub id: u32,
+    pub name: String,
     pub position: [f32; 3],
     pub rotation: [f32; 4],
+    pub plane_type: PlaneType,
 }
 
 #[derive(Event)]
@@ -369,6 +397,8 @@ pub struct TeleportToPlayer {
 #[derive(Component)]
 pub struct RemotePlayer {
     pub player_id: u32,
+    pub name: String,
+    pub plane_type: PlaneType,
 }
 
 #[derive(Component)]
@@ -408,11 +438,26 @@ pub fn spawn_remote_player(
     let position = Vec3::from(player_state.position);
     let rotation = Quat::from_array(player_state.rotation);
 
+    let (model_path, model_scale) = match player_state.plane_type {
+        PlaneType::Light => ("low-poly_airplane/scene.gltf#Scene0", 0.2),
+        PlaneType::Jet => ("f16_low_poly/scene.gltf#Scene0", 3.0),
+    };
+
+    let display_name = if player_state.name == "Pilot" {
+        format!("Pilot {}", player_state.id)
+    } else {
+        player_state.name.clone()
+    };
+
     let plane_entity = commands.spawn((
-        RemotePlayer { player_id: player_state.id },
+        RemotePlayer { 
+            player_id: player_state.id,
+            name: player_state.name.clone(),
+            plane_type: player_state.plane_type,
+        },
         Transform::from_translation(position)
             .with_rotation(rotation)
-            .with_scale(Vec3::splat(0.2)),
+            .with_scale(Vec3::splat(model_scale)),
         LerpTarget {
             position,
             last_position: position,
@@ -423,7 +468,7 @@ pub fn spawn_remote_player(
     )).id();
 
     let model_correction = commands.spawn(SceneRoot(
-        asset_server.load("low-poly_airplane/scene.gltf#Scene0")
+        asset_server.load(model_path)
     )).insert(Transform::from_rotation(
         Quat::from_rotation_y((180.0f32).to_radians())
     )).id();
@@ -440,7 +485,7 @@ pub fn spawn_remote_player(
     )).id();
 
     commands.spawn((
-        Text::new(format!("Player {}", player_state.id)),
+        Text::new(display_name),
         Node {
             position_type: PositionType::Absolute,
             ..default()
@@ -478,17 +523,63 @@ pub fn spawn_remote_player(
 
 pub fn update_remote_player(
     trigger: On<UpdateRemotePlayer>,
-    mut query: Query<&mut LerpTarget, With<RemotePlayer>>,
-    remote_players: Query<(Entity, &RemotePlayer)>,
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut query: Query<(&mut LerpTarget, &mut Transform, &Children), With<RemotePlayer>>,
+    mut remote_players: Query<(Entity, &mut RemotePlayer)>,
+    scene_query: Query<Entity, With<SceneRoot>>,
+    mut label_query: Query<(&mut Text, &PlayerLabelText)>,
 ) {
     let event = &trigger;
     
-    for (entity, remote_player) in remote_players.iter() {
+    for (entity, mut remote_player) in remote_players.iter_mut() {
         if remote_player.player_id == event.id {
-            if let Ok(mut lerp_target) = query.get_mut(entity) {
+            if let Ok((mut lerp_target, mut transform, children)) = query.get_mut(entity) {
                 lerp_target.last_position = lerp_target.position;
                 lerp_target.position = Vec3::from(event.position);
                 lerp_target.rotation = Quat::from_array(event.rotation);
+                
+                if remote_player.name != event.name {
+                    remote_player.name = event.name.clone();
+                    
+                    let display_name = if event.name == "Pilot" {
+                        format!("Pilot {}", event.id)
+                    } else {
+                        event.name.clone()
+                    };
+                    
+                    for (mut text, label) in label_query.iter_mut() {
+                        if label.player_id == event.id {
+                            **text = display_name;
+                            break;
+                        }
+                    }
+                }
+                
+                if remote_player.plane_type != event.plane_type {
+                    remote_player.plane_type = event.plane_type;
+                    
+                    let (model_path, model_scale) = match event.plane_type {
+                        PlaneType::Light => ("low-poly_airplane/scene.gltf#Scene0", 0.2),
+                        PlaneType::Jet => ("f16_low_poly/scene.gltf#Scene0", 3.0),
+                    };
+                    
+                    transform.scale = Vec3::splat(model_scale);
+                    
+                    for child in children.iter() {
+                        if scene_query.contains(child) {
+                            commands.entity(child).despawn();
+                            
+                            let model_correction = commands.spawn((
+                                SceneRoot(asset_server.load(model_path)),
+                                Transform::from_rotation(Quat::from_rotation_y((180.0f32).to_radians())),
+                            )).id();
+                            
+                            commands.entity(entity).add_child(model_correction);
+                            break;
+                        }
+                    }
+                }
             }
             break;
         }

@@ -29,11 +29,6 @@ pub fn spawn_vegetation_for_chunk(
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
     
     for (chunk_entity, chunk, chunk_transform) in chunks.iter() {
-        // Skip chunks not in the spawned set (they're being despawned)
-        if !chunk_manager.spawned_chunks.contains(&(chunk.x, chunk.z)) {
-            continue;
-        }
-        
         let dx = (chunk.x - cam_x) as f32;
         let dz = (chunk.z - cam_z) as f32;
         let distance = (dx * dx + dz * dz).sqrt();
@@ -84,7 +79,7 @@ pub fn spawn_vegetation_for_chunk(
                 
                 let (tree_model, biome_scale_multiplier, biome_density) = match biome {
                     Biome::Forest => (Some("pine.glb#Scene0"), 0.7, TREE_DENSITY * 1.2),
-                    Biome::Taiga => (Some("pine.glb#Scene0"), 1.2, TREE_DENSITY),
+                    Biome::Taiga => (Some("pine.glb#Scene0"), 1.1, TREE_DENSITY),
                     Biome::Grasslands => (Some("oak.glb#Scene0"), 0.8, TREE_DENSITY * 1.4),
                     _ => (None, 1.0, TREE_DENSITY),
                 };

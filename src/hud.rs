@@ -337,23 +337,58 @@ fn draw_artificial_horizon(ui: &mut egui::Ui, pitch: f32, roll: f32) {
         
         painter.circle_filled(center, radius + 1.0, sky_color);
         
-        let large_dist = radius * 3.0;
-        let horizon_left = rotate_point(-large_dist, -pitch_offset);
-        let horizon_right = rotate_point(large_dist, -pitch_offset);
-        let ground_bottom_left = rotate_point(-large_dist, -pitch_offset + large_dist);
-        let ground_bottom_right = rotate_point(large_dist, -pitch_offset + large_dist);
+        let num_segments = 360;
+        let mut ground_points = Vec::new();
+        let mut prev_is_ground = false;
         
-        painter.add(egui::Shape::convex_polygon(
-            vec![horizon_left, horizon_right, ground_bottom_right, ground_bottom_left],
-            ground_color,
-            egui::Stroke::NONE,
-        ));
+        for i in 0..=num_segments {
+            let angle = (i as f32 / num_segments as f32) * std::f32::consts::TAU;
+            let circle_x = radius * angle.cos();
+            let circle_y = radius * angle.sin();
+            
+            let local_y = -circle_x * sin_roll + circle_y * cos_roll;
+            let is_ground = local_y > -pitch_offset;
+            
+            if i > 0 && is_ground != prev_is_ground {
+                let prev_angle = ((i - 1) as f32 / num_segments as f32) * std::f32::consts::TAU;
+                let prev_x = radius * prev_angle.cos();
+                let prev_y = radius * prev_angle.sin();
+                let prev_local_y = -prev_x * sin_roll + prev_y * cos_roll;
+                
+                let t = (-pitch_offset - prev_local_y) / (local_y - prev_local_y);
+                let intersect_x = prev_x + t * (circle_x - prev_x);
+                let intersect_y = prev_y + t * (circle_y - prev_y);
+                
+                ground_points.push(egui::Pos2::new(
+                    center.x + intersect_x,
+                    center.y + intersect_y,
+                ));
+            }
+            
+            if is_ground {
+                ground_points.push(egui::Pos2::new(
+                    center.x + circle_x,
+                    center.y + circle_y,
+                ));
+            }
+            
+            prev_is_ground = is_ground;
+        }
         
-        for i in -6..=6 {
+        if ground_points.len() >= 3 {
+            painter.add(egui::Shape::convex_polygon(
+                ground_points,
+                ground_color,
+                egui::Stroke::NONE,
+            ));
+        }
+        
+        for i in -6..=6i32 {
             let angle = i as f32 * 10.0;
             let y_offset = (angle / 90.0) * radius - pitch_offset;
             
             if y_offset.abs() < radius * 1.5 {
+                let is_90_deg = i.abs() == 9;
                 let line_length = if i % 3 == 0 { 40.0 } else { 20.0 };
                 let stroke_width = if i % 3 == 0 { 2.0 } else { 1.0 };
                 
@@ -365,7 +400,7 @@ fn draw_artificial_horizon(ui: &mut egui::Ui, pitch: f32, roll: f32) {
                     egui::Stroke::new(stroke_width, egui::Color32::WHITE),
                 );
                 
-                if i != 0 && i % 3 == 0 {
+                if i != 0 && (i % 3 == 0 || is_90_deg) {
                     painter.text(
                         rotate_point(line_length / 2.0 + 15.0, y_offset),
                         egui::Align2::LEFT_CENTER,
@@ -794,6 +829,7 @@ pub enum PlaneType {
 #[derive(Resource)]
 pub struct MultiplayerMenu {
     pub server_address: String,
+    pub player_name: String,
     pub connection_status: String,
     pub connecting: bool,
     pub connection_receiver: Option<crossbeam_channel::Receiver<Result<NetworkClient, String>>>,
@@ -806,6 +842,7 @@ impl Default for MultiplayerMenu {
     fn default() -> Self {
         Self {
             server_address: DEFAULT_SERVER_ADDR.to_string(),
+            player_name: "Pilot".to_string(),
             connection_status: String::new(),
             connecting: false,
             connection_receiver: None,
@@ -820,6 +857,7 @@ pub fn auto_connect_on_startup(
     mut menu: ResMut<MultiplayerMenu>,
 ) {
     let address = DEFAULT_SERVER_ADDR.to_string();
+    let player_name = menu.player_name.clone();
     menu.connecting = true;
     menu.connection_status = "Auto-connecting...".to_string();
     
@@ -828,7 +866,7 @@ pub fn auto_connect_on_startup(
     
     let value = address.clone();
     std::thread::spawn(move || {
-        let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&value));
+        let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&value, player_name));
         let _ = tx.send(result);
     });
     

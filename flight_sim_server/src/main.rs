@@ -146,11 +146,13 @@ async fn handle_client(server: Arc<GameServer>, socket: TcpStream) {
                 match msg {
                     ClientMessage::Join { name: _ } => {
                     }
-                    ClientMessage::UpdatePosition { position, rotation } => {
+                    ClientMessage::UpdatePosition { name, position, rotation, plane_type } => {
                         let player_state = PlayerState {
                             id: player_id,
+                            name,
                             position,
                             rotation,
+                            plane_type,
                         };
 
                         let mut players = server.players.write().await;
@@ -169,8 +171,10 @@ async fn handle_client(server: Arc<GameServer>, socket: TcpStream) {
                             server.broadcast(
                                 ServerMessage::PlayerUpdate {
                                     id: player_id,
+                                    name: player_state.name.clone(),
                                     position,
                                     rotation,
+                                    plane_type,
                                 },
                                 Some(player_id),
                             ).await;

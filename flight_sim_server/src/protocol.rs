@@ -1,16 +1,30 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlaneType {
+    Light,
+    Jet,
+}
+
+impl Default for PlaneType {
+    fn default() -> Self {
+        PlaneType::Light
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
     pub id: u32,
+    pub name: String,
     pub position: [f32; 3],
     pub rotation: [f32; 4],
+    pub plane_type: PlaneType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     Join { name: String },
-    UpdatePosition { position: [f32; 3], rotation: [f32; 4] },
+    UpdatePosition { name: String, position: [f32; 3], rotation: [f32; 4], plane_type: PlaneType },
     Disconnect,
 }
 
@@ -28,8 +42,10 @@ pub enum ServerMessage {
     },
     PlayerUpdate {
         id: u32,
+        name: String,
         position: [f32; 3],
         rotation: [f32; 4],
+        plane_type: PlaneType,
     },
     PlayerLeft {
         id: u32,

@@ -598,8 +598,14 @@ pub fn debugger_ui(
                 ui.separator();
                 ui.heading("Multiplayer");
                 
+                ui.label("Your Name:");
+                ui.text_edit_singleline(&mut menu.player_name);
+                
                 if let Some(client) = &mut client {
+                    client.player_name = menu.player_name.clone();
+                    
                     if client.connected {
+                        ui.separator();
                         ui.label(format!("Connected! (Player ID: {})", client.player_id.unwrap_or(0)));
                         
                         ui.separator();
@@ -651,6 +657,7 @@ pub fn debugger_ui(
                             menu.connection_status = "Disconnected".to_string();
                         }
                     } else {
+                        ui.separator();
                         ui.label("🔴 Not Connected");
                         ui.separator();
                         
@@ -663,6 +670,7 @@ pub fn debugger_ui(
                             ui.label("Connecting...");
                         } else if ui.button("Connect").clicked() {
                             let address = menu.server_address.clone();
+                            let player_name = menu.player_name.clone();
                             menu.connecting = true;
                             menu.connection_status.clear();
                             
@@ -670,7 +678,7 @@ pub fn debugger_ui(
                             menu.connection_receiver = Some(rx);
                             
                             std::thread::spawn(move || {
-                                let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address));
+                                let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address, player_name));
                                 let _ = tx.send(result);
                             });
                         }
@@ -681,6 +689,7 @@ pub fn debugger_ui(
                         }
                     }
                 } else {
+                    ui.separator();
                     ui.label("🔴 Not Connected");
                     ui.separator();
                     
@@ -693,6 +702,7 @@ pub fn debugger_ui(
                         ui.label("Connecting...");
                     } else if ui.button("Connect").clicked() {
                         let address = menu.server_address.clone();
+                        let player_name = menu.player_name.clone();
                         menu.connecting = true;
                         menu.connection_status.clear();
                         
@@ -700,7 +710,7 @@ pub fn debugger_ui(
                         menu.connection_receiver = Some(rx);
                         
                         std::thread::spawn(move || {
-                            let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address));
+                            let result = network::TOKIO_RUNTIME.block_on(network::connect_to_server(&address, player_name));
                             let _ = tx.send(result);
                         });
                     }
