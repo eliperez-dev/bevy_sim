@@ -13,7 +13,7 @@ pub const MAX_ILLUMANENCE: f32 = 5_300.0;
 pub const TERRAIN_HORIZONTAL_SCALE: f32 = 1.0;
 
 pub fn world_units_to_meters(world_units: f32) -> f32 {
-    world_units * 0.41967669172
+    world_units *  0.19167
 }
 
 pub struct TerrainStop {
