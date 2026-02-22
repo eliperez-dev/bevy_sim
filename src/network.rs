@@ -13,7 +13,7 @@ pub static TOKIO_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 });
 
 pub const _DEFAULT_SERVER_PORT: u16 = 7878;
-pub const DEFAULT_SERVER_ADDR: &str = "192.168.0.184:7878";
+pub const DEFAULT_SERVER_ADDR: &str = "https://e7eb-75-237-222-254.ngrok-free.app";
 const MAX_MESSAGE_SIZE: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,7 +158,7 @@ pub async fn connect_to_server(address: &str, player_name: String) -> Result<Net
         player_name,
         connected: true,
         world_seed: None,
-        original_seed: 0,
+        original_seed: rand::random::<u32>(),
         send_tx,
         recv_rx: Arc::new(tokio::sync::Mutex::new(recv_rx)),
         disconnect_rx: Arc::new(tokio::sync::Mutex::new(disconnect_rx)),
