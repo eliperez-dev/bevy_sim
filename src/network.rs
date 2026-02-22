@@ -640,13 +640,13 @@ pub fn respawn_aircraft(
     if let Ok((mut transform, mut aircraft)) = aircraft_query.single_mut() {
         let spawn_pos = [0.0, 0.0, 0.0];
         let terrain_height = world_gen.get_terrain_height(&spawn_pos);
-        let spawn_height = (terrain_height + crate::consts::RESPAWN_HEIGHT).max(crate::consts::RESPAWN_HEIGHT * 2.0);
+        let spawn_height = (terrain_height + aircraft.respawn_height).max(aircraft.respawn_height * 2.0);
         
         transform.translation = Vec3::new(0.0, spawn_height, 0.0);
         transform.rotation = Quat::IDENTITY;
         
         aircraft.crashed = false;
-        aircraft.speed = 150.0;
+        aircraft.speed = aircraft.respawn_speed;
         aircraft.throttle = 0.8;
         aircraft.velocity = Vec3::ZERO;
         aircraft.pitch_velocity = 0.0;

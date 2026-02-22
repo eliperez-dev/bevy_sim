@@ -5,7 +5,6 @@ use bevy::{
 use noise::{NoiseFn, Perlin};
 
 use crate::world_generation::WorldGenerator;
-use crate::consts::RESPAWN_HEIGHT;
 
 // Constants for physics calculations
 const BASE_THRUST_MULTIPLIER: f32 = 50.0;
@@ -115,10 +114,15 @@ pub struct Aircraft {
     
     // Flight assists
     pub auto_level_strength: f32,
+    
+    // Respawn settings
+    pub respawn_height: f32,
+    pub respawn_speed: f32,
 }
 
-impl Default for Aircraft {
-    fn default() -> Self {
+
+impl Aircraft {
+    pub fn light() -> Self {
         Self {
             velocity: Vec3::ZERO,
             speed: 150.0,
@@ -140,6 +144,35 @@ impl Default for Aircraft {
             yaw_strength: 1.0,
             bank_turn_strength: 0.85,
             auto_level_strength: 1.00,
+            respawn_height: 500.0,
+            respawn_speed: 150.0,
+        }
+    }
+
+    pub fn jet() -> Self {
+        Self {
+            velocity: Vec3::ZERO,
+            speed: 1000.0,
+            throttle: 0.80,
+            pitch_velocity: 0.0,
+            roll_velocity: 0.0,
+            yaw_velocity: 0.0,
+            crashed: false,
+            max_speed: 1500.0,
+            max_throttle: 2.5,
+            thrust: 8.0,
+            gravity: 80.0,       
+            g_force_drag: 2.5,
+            lift_coefficient: 2.5,
+            lift_reduction_factor: 30.0,
+            parasitic_drag_coef: 100.0,
+            pitch_strength: 3.0,
+            roll_strength: 12.5,
+            yaw_strength: 0.35,
+            bank_turn_strength: 0.1,
+            auto_level_strength: 0.1,
+            respawn_height: 1000.0,
+            respawn_speed: 1300.0,
         }
     }
 }
@@ -227,7 +260,7 @@ fn handle_input_toggles(
                     let terrain_height = world_gen.get_terrain_height(&[current_pos.x, current_pos.y, current_pos.z]);
                     
                     aircraft.crashed = false;
-                    aircraft.speed = 150.0;
+                    aircraft.speed = aircraft.respawn_speed;
                     aircraft.throttle = 0.8;
                     aircraft.velocity = Vec3::ZERO;
                     aircraft.pitch_velocity = 0.0;
@@ -235,7 +268,7 @@ fn handle_input_toggles(
                     aircraft.yaw_velocity = 0.0;
                     control_mode.physics_paused = false;
                     
-                    transform.translation.y = (terrain_height + RESPAWN_HEIGHT).max(RESPAWN_HEIGHT);
+                    transform.translation.y = (terrain_height + aircraft.respawn_height).max(aircraft.respawn_height);
                     transform.rotation = Quat::IDENTITY;
                     
                     info!("Aircraft respawned");

@@ -172,7 +172,9 @@ fn setup(
     let world_gen = WorldGenerator::new(3);
     let spawn_pos = [0.0, 0.0, 0.0];
     let terrain_height = world_gen.get_terrain_height(&spawn_pos);
-    let spawn_height = (terrain_height + RESPAWN_HEIGHT).max(RESPAWN_HEIGHT);
+    
+    let aircraft = Aircraft::light();
+    let spawn_height = (terrain_height + aircraft.respawn_height).max(aircraft.respawn_height);
     
     commands.insert_resource(world_gen);
     
@@ -215,7 +217,7 @@ fn setup(
     ));
 
     let plane_entity = commands.spawn((
-        Aircraft::default(),
+        aircraft,
         Transform::from_xyz(0.0, spawn_height, 0.0).with_scale(Vec3::splat(0.2)),
         Visibility::default(),
         InheritedVisibility::default(),
@@ -379,7 +381,7 @@ fn ui_aircraft_physics(ui: &mut egui::Ui, aircraft: &mut Aircraft) {
     
     ui.label("Engine & Drag");
     ui.add(egui::Slider::new(&mut aircraft.max_speed, 50.0..=5000.0).text("Max Speed"));
-    ui.add(egui::Slider::new(&mut aircraft.thrust, 0.1..=3.0).text("Engine Response"));
+    ui.add(egui::Slider::new(&mut aircraft.thrust, 0.1..=10.0).text("Engine Response"));
     ui.add(egui::Slider::new(&mut aircraft.parasitic_drag_coef, 0.0..=50.0).text("Parasitic Drag"));
     ui.add(egui::Slider::new(&mut aircraft.g_force_drag, 0.0..=10.0).text("G-Force Drag"));
     
@@ -392,9 +394,9 @@ fn ui_aircraft_physics(ui: &mut egui::Ui, aircraft: &mut Aircraft) {
     ui.separator();
     ui.label("Responsiveness & Assists");
     ui.horizontal(|ui| {
-        ui.add(egui::Slider::new(&mut aircraft.pitch_strength, 0.5..=10.0).text("Pitch"));
-        ui.add(egui::Slider::new(&mut aircraft.roll_strength, 0.5..=10.0).text("Roll"));
-        ui.add(egui::Slider::new(&mut aircraft.yaw_strength, 0.5..=10.0).text("Yaw"));
+        ui.add(egui::Slider::new(&mut aircraft.pitch_strength, 0.5..=15.0).text("Pitch"));
+        ui.add(egui::Slider::new(&mut aircraft.roll_strength, 0.5..=15.0).text("Roll"));
+        ui.add(egui::Slider::new(&mut aircraft.yaw_strength, 0.5..=15.0).text("Yaw"));
     });
     ui.add(egui::Slider::new(&mut aircraft.bank_turn_strength, 0.0..=5.0).text("Auto-Turn (Bank)"));
     ui.add(egui::Slider::new(&mut aircraft.auto_level_strength, 0.0..=5.0).text("Auto-Level (Stability)"));
@@ -553,6 +555,23 @@ pub fn debugger_ui(
                         ui.add(egui::Slider::new(density, 0.000005..=0.001).text("Fog Density").logarithmic(true));
                     }
                 }
+                
+                ui.separator();
+                ui.heading("Aircraft");
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(menu.plane_type == hud::PlaneType::Light, "Light").clicked() {
+                        menu.plane_type = hud::PlaneType::Light;
+                        if let Ok(mut aircraft) = aircraft_query.single_mut() {
+                            *aircraft = controls::Aircraft::light();
+                        }
+                    }
+                    if ui.selectable_label(menu.plane_type == hud::PlaneType::Jet, "Jet").clicked() {
+                        menu.plane_type = hud::PlaneType::Jet;
+                        if let Ok(mut aircraft) = aircraft_query.single_mut() {
+                            *aircraft = controls::Aircraft::jet();
+                        }
+                    }
+                });
                 
                 ui.separator();
                 ui.heading("Time & Weather");

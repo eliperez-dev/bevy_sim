@@ -786,6 +786,12 @@ pub enum GraphicsPreset {
     High,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaneType {
+    Light,
+    Jet,
+}
+
 #[derive(Resource)]
 pub struct MultiplayerMenu {
     pub server_address: String,
@@ -794,6 +800,7 @@ pub struct MultiplayerMenu {
     pub connection_receiver: Option<crossbeam_channel::Receiver<Result<NetworkClient, String>>>,
     pub settings_tab: SettingsTab,
     pub graphics_preset: GraphicsPreset,
+    pub plane_type: PlaneType,
 }
 
 impl Default for MultiplayerMenu {
@@ -805,6 +812,7 @@ impl Default for MultiplayerMenu {
             connection_receiver: None,
             settings_tab: SettingsTab::Basic,
             graphics_preset: GraphicsPreset::Low,
+            plane_type: PlaneType::Light,
         }
     }
 }
