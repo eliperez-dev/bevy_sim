@@ -13,7 +13,7 @@ pub static TOKIO_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 });
 
 pub const _DEFAULT_SERVER_PORT: u16 = 7878;
-pub const DEFAULT_SERVER_ADDR: &str = "https://e7eb-75-237-222-254.ngrok-free.app";
+pub const DEFAULT_SERVER_ADDR: &str = "75.237.222.254:7878";
 const MAX_MESSAGE_SIZE: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
