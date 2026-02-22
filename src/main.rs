@@ -115,7 +115,7 @@ fn main() {
         .add_observer(network::respawn_aircraft)
         .add_systems(Startup, setup_camera_system)
         .add_systems(EguiPrimaryContextPass, (debugger_ui, flight_hud_system))
-        .add_systems(Startup, (setup, setup_camera_fog, spawn_stars, hud::auto_connect_on_startup).chain())
+        .add_systems(Startup, (setup, setup_camera_fog, spawn_stars, hud::auto_connect_on_startup, init_camera_from_aircraft).chain())
         .add_systems(Update, (
             evolve_wind,
             camera_controls, 
@@ -123,17 +123,18 @@ fn main() {
             generate_chunks, 
             modify_plane, 
             handle_compute_tasks, 
-            spawn_vegetation_for_chunk,
             update_tree_lod,
             update_chunk_lod, 
             update_daylight_cycle,
             draw_lod_rings,
+            update_aircraft_model,
             network::check_connection_status,
             network::send_player_updates,
             network::receive_server_messages,
             network::lerp_remote_players,
             network::update_player_labels,
             hud::process_connection_results,
+            spawn_vegetation_for_chunk.after(network::receive_server_messages).after(network::check_connection_status).after(update_debugger),
         ))
         .add_systems(PostUpdate, (
             despawn_out_of_bounds_chunks,
@@ -216,17 +217,20 @@ fn setup(
         Sun, 
     ));
 
+    let model_path = aircraft.model_path.clone();
+    let model_scale = aircraft.model_scale;
+    
     let plane_entity = commands.spawn((
         aircraft,
-        Transform::from_xyz(0.0, spawn_height, 0.0).with_scale(Vec3::splat(0.2)),
+        Transform::from_xyz(0.0, spawn_height, 0.0).with_scale(Vec3::splat(model_scale)),
         Visibility::default(),
         InheritedVisibility::default(),
     )).id();
 
-    let model_correction = commands.spawn(SceneRoot(
-        asset_server.load("low-poly_airplane/scene.gltf#Scene0")
-    )).insert(Transform::from_rotation(
-        Quat::from_rotation_y((180.0f32).to_radians()) 
+    let model_correction = commands.spawn((
+        SceneRoot(asset_server.load(model_path)),
+        Transform::from_rotation(Quat::from_rotation_y((180.0f32).to_radians())),
+        AircraftModel,
     )).id();
 
     commands.entity(plane_entity).add_child(model_correction);
@@ -501,7 +505,7 @@ pub fn debugger_ui(
     mut menu: ResMut<hud::MultiplayerMenu>,
     mut smoothing_settings: ResMut<network::NetworkSmoothingSettings>,
     mut world_generator: ResMut<WorldGenerator>,
-    chunks: Query<(Entity, &Chunk)>,
+    chunks: Query<(Entity, &Chunk, Option<&Children>)>,
 ) -> Result<(), > { 
     egui::Window::new("Settings")
     .default_pos(egui::Pos2::new(20.0, 20.0))
@@ -627,11 +631,14 @@ pub fn debugger_ui(
                             
                             *world_generator = WorldGenerator::new(original_seed);
                             
-                            for (entity, chunk) in chunks.iter() {
-                                if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                                    entity_commands.despawn();
-                                    chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                            for (entity, chunk, children) in chunks.iter() {
+                                chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                                if let Some(children) = children {
+                                    for child in children.iter() {
+                                        commands.entity(child).despawn();
+                                    }
                                 }
+                                commands.entity(entity).despawn();
                             }
                             
                             chunk_manager.last_camera_chunk = None;
@@ -784,11 +791,14 @@ pub fn debugger_ui(
                                 
                                 *world_generator = WorldGenerator::new(original_seed);
                                 
-                                for (entity, chunk) in chunks.iter() {
-                                    if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                                        entity_commands.despawn();
-                                        chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                                for (entity, chunk, children) in chunks.iter() {
+                                    chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                                    if let Some(children) = children {
+                                        for child in children.iter() {
+                                            commands.entity(child).despawn();
+                                        }
                                     }
+                                    commands.entity(entity).despawn();
                                 }
                                 
                                 chunk_manager.last_camera_chunk = None;

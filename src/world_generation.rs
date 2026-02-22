@@ -661,7 +661,7 @@ pub fn update_chunk_lod(
 pub fn despawn_out_of_bounds_chunks(
     mut commands: Commands,
     camera: Query<&Transform, With<MainCamera>>,
-    chunks: Query<(Entity, &Chunk)>,
+    chunks: Query<(Entity, &Chunk, Option<&Children>)>,
     mut chunk_manager: ResMut<ChunkManager>,
     settings: Res<WorldGenerationSettings>,
 ) {
@@ -674,23 +674,27 @@ pub fn despawn_out_of_bounds_chunks(
     
     let mut chunks_to_despawn = Vec::new();
 
-    for (entity, chunk) in &chunks {
+    for (entity, chunk, children) in &chunks {
         let dx = (chunk.x - cam_x) as f32;
         let dz = (chunk.z - cam_z) as f32;
         let distance_sq = dx * dx + dz * dz; 
 
         if distance_sq > despawn_distance_sq {
-            chunks_to_despawn.push((entity, chunk.x, chunk.z, distance_sq));
+            let child_vec = children.map(|c| c.iter().collect::<Vec<_>>());
+            chunks_to_despawn.push((entity, chunk.x, chunk.z, distance_sq, child_vec));
         }
     }
 
     chunks_to_despawn.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
 
-    for (entity, x, z, _) in chunks_to_despawn.iter().take(settings.max_chunks_per_frame * 2) {
-        if let Ok(mut entity_commands) = commands.get_entity(*entity) {
-            entity_commands.despawn();
-            chunk_manager.spawned_chunks.remove(&(*x, *z));
+    for (entity, x, z, _, children) in chunks_to_despawn.iter().take(settings.max_chunks_per_frame * 2) {
+        chunk_manager.spawned_chunks.remove(&(*x, *z));
+        if let Some(children) = children {
+            for child in children {
+                commands.entity(*child).despawn();
+            }
         }
+        commands.entity(*entity).despawn();
     }
 }
 

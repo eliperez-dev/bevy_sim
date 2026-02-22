@@ -39,7 +39,6 @@ const ORBIT_PITCH_MIN: f32 = -0.4;
 const ORBIT_PITCH_MAX: f32 = 1.2;
 const CAMERA_MAX_EXTRA_DISTANCE: f32 = 15.0;
 const CAMERA_SPEED_THRESHOLD: f32 = 100.0;
-const CAMERA_HEIGHT: f32 = 12.0;
 const CAMERA_SMOOTHNESS_BASE: f32 = 2.0;
 const CAMERA_SMOOTHNESS_MULTIPLIER: f32 = 1.5;
 const CAMERA_LOOK_AHEAD_MULTIPLIER: f32 = 0.2;
@@ -72,6 +71,9 @@ pub struct MainCamera {
     pub orbit_pitch: f32,
     pub orbit_distance: f32, 
 }
+
+#[derive(Component)]
+pub struct AircraftModel;
 
 impl Default for MainCamera {
     fn default() -> Self {
@@ -118,6 +120,14 @@ pub struct Aircraft {
     // Respawn settings
     pub respawn_height: f32,
     pub respawn_speed: f32,
+    
+    // Camera settings
+    pub camera_height: f32,
+    pub camera_distance: f32,
+    
+    // Model settings
+    pub model_path: String,
+    pub model_scale: f32,
 }
 
 
@@ -146,13 +156,17 @@ impl Aircraft {
             auto_level_strength: 1.00,
             respawn_height: 500.0,
             respawn_speed: 150.0,
+            camera_height: 12.0,
+            camera_distance: 15.0,
+            model_path: "low-poly_airplane/scene.gltf#Scene0".to_string(),
+            model_scale: 0.2,
         }
     }
 
     pub fn jet() -> Self {
         Self {
             velocity: Vec3::ZERO,
-            speed: 1000.0,
+            speed: 1300.0,
             throttle: 0.80,
             pitch_velocity: 0.0,
             roll_velocity: 0.0,
@@ -160,7 +174,7 @@ impl Aircraft {
             crashed: false,
             max_speed: 1500.0,
             max_throttle: 2.5,
-            thrust: 8.0,
+            thrust: 4.0,
             gravity: 80.0,       
             g_force_drag: 2.5,
             lift_coefficient: 2.5,
@@ -173,6 +187,10 @@ impl Aircraft {
             auto_level_strength: 0.1,
             respawn_height: 1000.0,
             respawn_speed: 1300.0,
+            camera_height: 12.0,
+            camera_distance: 60.0,
+            model_path: "f16_low_poly/scene.gltf#Scene0".to_string(),
+            model_scale: 15.0,
         }
     }
 }
@@ -779,6 +797,46 @@ pub fn evolve_wind(
     wind.wind_speed = wind.min_wind_speed + (speed_noise + 1.0) * 0.5 * speed_range;
 }
 
+/// Initialize camera distance from aircraft settings
+pub fn init_camera_from_aircraft(
+    aircraft_query: Query<&Aircraft>,
+    mut camera_query: Query<&mut MainCamera>,
+) {
+    if let Ok(aircraft) = aircraft_query.single() {
+        if let Ok(mut main_camera) = camera_query.single_mut() {
+            main_camera.orbit_distance = aircraft.camera_distance;
+        }
+    }
+}
+
+/// Update aircraft model and scale when aircraft changes
+pub fn update_aircraft_model(
+    mut aircraft_query: Query<(Entity, &Aircraft, &Children, &mut Transform), Changed<Aircraft>>,
+    model_query: Query<(Entity, &SceneRoot), With<AircraftModel>>,
+    mut camera_query: Query<&mut MainCamera>,
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+) {
+    for (_aircraft_entity, aircraft, children, mut transform) in aircraft_query.iter_mut() {
+        transform.scale = Vec3::splat(aircraft.model_scale);
+        
+        if let Ok(mut main_camera) = camera_query.single_mut() {
+            main_camera.orbit_distance = aircraft.camera_distance;
+        }
+        
+        for child in children.iter() {
+            if let Ok((model_entity, current_scene)) = model_query.get(child) {
+                let new_path = aircraft.model_path.clone();
+                let current_path = current_scene.0.path().map(|p| p.to_string()).unwrap_or_default();
+                
+                if current_path != new_path {
+                    commands.entity(model_entity).insert(SceneRoot(asset_server.load(new_path)));
+                }
+            }
+        }
+    }
+}
+
 /// Camera follow system for orbit and chase modes
 pub fn camera_follow_aircraft(
     time: Res<Time>,
@@ -842,7 +900,7 @@ pub fn camera_follow_aircraft(
             let orbit_rotation = Quat::from_axis_angle(world_up, main_camera.orbit_yaw) 
                                * Quat::from_axis_angle(world_right, main_camera.orbit_pitch);
 
-            let base_offset = Vec3::new(0.0, CAMERA_HEIGHT * 1.5, -dynamic_distance * 1.5);
+            let base_offset = Vec3::new(0.0, aircraft.camera_height * 1.5, -dynamic_distance * 1.5);
             let rotated_offset = orbit_rotation * base_offset;
 
             let target_position = plane_transform.translation + rotated_offset;
@@ -854,7 +912,7 @@ pub fn camera_follow_aircraft(
         FlightMode::Aircraft => {
             let target_position = plane_transform.translation 
                 + (-actual_direction * dynamic_distance) 
-                + (plane_transform.up() * CAMERA_HEIGHT);
+                + (plane_transform.up() * aircraft.camera_height);
             camera_transform.translation = camera_transform.translation.lerp(target_position, t);
 
             let look_ahead_distance = CAMERA_LOOK_AHEAD_MULTIPLIER * aircraft.speed;

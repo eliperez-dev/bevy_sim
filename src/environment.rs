@@ -29,6 +29,11 @@ pub fn spawn_vegetation_for_chunk(
     let cam_z = (cam_transform.z / CHUNK_SIZE).round() as i32;
     
     for (chunk_entity, chunk, chunk_transform) in chunks.iter() {
+        // Skip chunks not in the spawned set (they're being despawned)
+        if !chunk_manager.spawned_chunks.contains(&(chunk.x, chunk.z)) {
+            continue;
+        }
+        
         let dx = (chunk.x - cam_x) as f32;
         let dz = (chunk.z - cam_z) as f32;
         let distance = (dx * dx + dz * dz).sqrt();
@@ -138,20 +143,22 @@ pub fn spawn_vegetation_for_chunk(
             }
         }
    
-        commands.entity(chunk_entity).with_children(|parent| {
-            for (model_path, position, rotation_y, scale) in tree_spawns {
-                parent.spawn((
-                    SceneRoot(asset_server.load(model_path)),
-                    Transform::from_translation(position)
-                        .with_rotation(Quat::from_rotation_y(rotation_y))
-                        .with_scale(Vec3::splat(scale * 40.0)),
-                    Tree,
-                    Visibility::Hidden,
-                ));
-            }
-        });
+        if !tree_spawns.is_empty() {
+            commands.entity(chunk_entity).with_children(|parent| {
+                for (model_path, position, rotation_y, scale) in tree_spawns {
+                    parent.spawn((
+                        SceneRoot(asset_server.load(model_path)),
+                        Transform::from_translation(position)
+                            .with_rotation(Quat::from_rotation_y(rotation_y))
+                            .with_scale(Vec3::splat(scale * 40.0)),
+                        Tree,
+                        Visibility::Hidden,
+                    ));
+                }
+            });
+        }
         
-        commands.entity(chunk_entity).insert(VegetationSpawner);
+        commands.entity(chunk_entity).try_insert(VegetationSpawner);
     }
 }
 

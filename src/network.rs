@@ -220,7 +220,7 @@ pub fn check_connection_status(
     mut commands: Commands,
     mut world_generator: ResMut<crate::world_generation::WorldGenerator>,
     mut chunk_manager: ResMut<crate::world_generation::ChunkManager>,
-    chunks: Query<(Entity, &crate::world_generation::Chunk)>,
+    chunks: Query<(Entity, &crate::world_generation::Chunk, Option<&Children>)>,
     mut render_settings: ResMut<crate::RenderSettings>,
 ) {
     let Some(mut client) = client else { return };
@@ -244,11 +244,14 @@ pub fn check_connection_status(
         
         *world_generator = crate::world_generation::WorldGenerator::new(original_seed);
         
-        for (entity, chunk) in chunks.iter() {
-            if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                entity_commands.despawn();
-                chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+        for (entity, chunk, children) in chunks.iter() {
+            chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+            if let Some(children) = children {
+                for child in children.iter() {
+                    commands.entity(child).despawn();
+                }
             }
+            commands.entity(entity).despawn();
         }
         
         chunk_manager.last_camera_chunk = None;
@@ -266,7 +269,7 @@ pub fn receive_server_messages(
     mut commands: Commands,
     mut world_generator: ResMut<crate::world_generation::WorldGenerator>,
     mut chunk_manager: ResMut<crate::world_generation::ChunkManager>,
-    chunks: Query<(Entity, &crate::world_generation::Chunk)>,
+    chunks: Query<(Entity, &crate::world_generation::Chunk, Option<&Children>)>,
     mut render_settings: ResMut<crate::RenderSettings>,
     mut day_cycle: ResMut<crate::day_cycle::DayNightCycle>,
 ) {
@@ -289,12 +292,15 @@ pub fn receive_server_messages(
                         // Update world generator with server seed
                         *world_generator = crate::world_generation::WorldGenerator::new(seed);
                         
-                        // Despawn all existing chunks
-                        for (entity, chunk) in chunks.iter() {
-                            if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                                entity_commands.despawn();
-                                chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                        // Despawn all existing chunks and their vegetation
+                        for (entity, chunk, children) in chunks.iter() {
+                            chunk_manager.spawned_chunks.remove(&(chunk.x, chunk.z));
+                            if let Some(children) = children {
+                                for child in children.iter() {
+                                    commands.entity(child).despawn();
+                                }
                             }
+                            commands.entity(entity).despawn();
                         }
                         
                         println!("🔄 Regenerating world with seed {}", seed);
@@ -656,6 +662,7 @@ pub fn respawn_aircraft(
         if let Ok((mut camera_transform, mut main_camera)) = camera_query.single_mut() {
             main_camera.orbit_yaw = 0.0;
             main_camera.orbit_pitch = 0.0;
+            main_camera.orbit_distance = aircraft.camera_distance;
             
             let camera_offset = Vec3::new(0.0, 9.0, main_camera.orbit_distance * 5.0);
             camera_transform.translation = transform.translation + camera_offset;
