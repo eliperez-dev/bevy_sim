@@ -1,5 +1,4 @@
 use bevy::color::Mix;
-use bevy::ecs::relationship::Relationship;
 use bevy::light::CascadeShadowConfig;
 use noise::{NoiseFn, Perlin};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
@@ -16,58 +15,7 @@ use crate::controls::MainCamera;
 
 #[derive(Component)]
 pub struct WaterChunk;
-pub fn _animate_water_cpu(
-    time: Res<Time>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    // 1. Add `&Parent` so the water knows which chunk it belongs to
-    water_query: Query<(&Mesh3d, &GlobalTransform, &ChildOf), With<WaterChunk>>, 
-    // 2. Query to read the terrain chunk's data
-    chunk_query: Query<&Chunk>, 
-    chunk_manager: Res<ChunkManager>,
-) {
-    let t = time.elapsed_secs();
-    
-    let amplitude = 5.0;
-    let frequency = 0.015;
-    let speed = 1.5;
 
-    // Grab the subdivision count of your highest fidelity LOD.
-    // Assuming chunk_manager.lod_levels is sorted nearest-to-farthest, index 0 is your highest LOD.
-    // (e.g., if your highest LOD is 64 subdivisions, this evaluates to 64)
-    let highest_lod = chunk_manager.lod_levels[0].1; 
-
-    for (mesh_handle, global_transform, parent) in water_query.iter() {
-        
-        // 3. Look up the parent terrain chunk. If it doesn't exist, skip.
-        let Ok(chunk) = chunk_query.get(parent.get()) else { continue; };
-        
-        // Is this the highest LOD chunk?
-        let is_high_fidelity = chunk.current_lod == highest_lod;
-
-        if let Some(mesh) = meshes.get_mut(mesh_handle)
-            && let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
-                
-                let chunk_world_pos = global_transform.translation();
-
-                for pos in positions.iter_mut() { 
-                    if is_high_fidelity {
-                        // Do the expensive trig math for nearby chunks
-                        let world_x = pos[0] + chunk_world_pos.x;
-                        let world_z = pos[2] + chunk_world_pos.z;
-
-                        let wave1 = (world_x * frequency + t * speed).sin() * amplitude;
-                        let wave2 = (world_z * frequency * 0.8 + t * speed * 1.2).cos() * amplitude;
-                        
-                        pos[1] = wave1 + wave2; 
-                    } else {
-                        // 4. Force lower LOD chunks to remain perfectly flat.
-                        // By bypassing the sine/cosine math entirely, we save CPU cycles.
-                        pos[1] = 0.0;
-                    }
-                }
-            }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Biome {

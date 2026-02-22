@@ -1,8 +1,8 @@
 use bevy::prelude::Color;
 
-pub const OCEAN_HUMIDITY_THRESHOLD: f32 = 0.70;
+pub const OCEAN_HUMIDITY_THRESHOLD: f32 = 0.60;
 pub const OCEAN_HUMIDITY_OFFSET: f32 = 0.1;
-pub const OCEAN_HOT_TEMP_THRESHOLD: f32 = 0.9;
+pub const OCEAN_HOT_TEMP_THRESHOLD: f32 = 0.95;
 pub const OCEAN_COLD_TEMP_THRESHOLD: f32 = 0.0;
 pub const OCEAN_TRANSITION_WIDTH: f32 = 0.3;
 

@@ -781,7 +781,7 @@ pub fn evolve_wind(
     let pitch_rotation_speed = pitch_noise * 0.1;
     
     let yaw_rotation = Quat::from_rotation_y(yaw_rotation_speed * dt);
-    let right_axis = Vec3::new(-wind.wind_direction.z, 0.0, wind.wind_direction.x).normalize_or_zero();
+    let right_axis = Vec3::Y.cross(wind.wind_direction).normalize_or_zero();
     let pitch_rotation = if right_axis.length_squared() > 0.001 {
         Quat::from_axis_angle(right_axis, pitch_rotation_speed * dt)
     } else {
@@ -819,7 +819,6 @@ pub fn update_aircraft_model(
     for (_aircraft_entity, aircraft, children, mut transform) in aircraft_query.iter_mut() {
         transform.scale = Vec3::splat(aircraft.model_scale);
         
-        
         for child in children.iter() {
             if let Ok((model_entity, current_scene)) = model_query.get(child) {
                 let new_path = aircraft.model_path.clone();
@@ -827,6 +826,9 @@ pub fn update_aircraft_model(
                 
                 if current_path != new_path {
                     commands.entity(model_entity).insert(SceneRoot(asset_server.load(new_path)));
+                    if let Ok(mut main_camera) = camera_query.single_mut() {
+                        main_camera.orbit_distance = aircraft.camera_distance;
+                    }
                 }
             }
         }
