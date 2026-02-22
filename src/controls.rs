@@ -27,15 +27,14 @@ const TURBULENCE_COUPLING_STRENGTH: f32 = 0.7;
 const AUTO_LEVEL_PITCH_DIVISOR: f32 = 1.25;
 
 // Camera control constants
-const FREE_FLIGHT_ROTATION_SPEED: f32 = 0.7;
-const FREE_FLIGHT_PAN_SPEED_NORMAL: f32 = 500.0;
-const FREE_FLIGHT_PAN_SPEED_FAST: f32 = 3000.0;
+const FREE_FLIGHT_ROTATION_SPEED: f32 = 0.8;
+const FREE_FLIGHT_PAN_SPEED_NORMAL: f32 = 800.0;
+const FREE_FLIGHT_PAN_SPEED_FAST: f32 = 6000.0;
 const THROTTLE_CHANGE_RATE: f32 = 0.5;
-const CAMERA_ZOOM_SPEED: f32 = 10.0;
-const CAMERA_ZOOM_MIN: f32 = 1.0;
-const CAMERA_ZOOM_MAX: f32 = 250.0;
+const CAMERA_ZOOM_SPEED: f32 = 120.0;
+const CAMERA_ORBIT_DISTANCE_MAX: f32 = 1000.0;
 const ORBIT_ROTATION_SPEED: f32 = 2.5;
-const ORBIT_PITCH_MIN: f32 = -0.4;
+const ORBIT_PITCH_MIN: f32 = -1.2;
 const ORBIT_PITCH_MAX: f32 = 1.2;
 const CAMERA_MAX_EXTRA_DISTANCE: f32 = 30.0;
 const CAMERA_SPEED_THRESHOLD: f32 = 200.0;
@@ -820,9 +819,6 @@ pub fn update_aircraft_model(
     for (_aircraft_entity, aircraft, children, mut transform) in aircraft_query.iter_mut() {
         transform.scale = Vec3::splat(aircraft.model_scale);
         
-        if let Ok(mut main_camera) = camera_query.single_mut() {
-            main_camera.orbit_distance = aircraft.camera_distance;
-        }
         
         for child in children.iter() {
             if let Ok((model_entity, current_scene)) = model_query.get(child) {
@@ -860,7 +856,7 @@ pub fn camera_follow_aircraft(
         if keyboard.pressed(KeyCode::KeyZ) { 
             main_camera.orbit_distance += CAMERA_ZOOM_SPEED * time.delta_secs(); 
         }
-        main_camera.orbit_distance = main_camera.orbit_distance.clamp(CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX);
+        main_camera.orbit_distance = main_camera.orbit_distance.clamp(0.0, CAMERA_ORBIT_DISTANCE_MAX);
     }
 
     // Calculate camera positioning

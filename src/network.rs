@@ -438,9 +438,9 @@ pub fn spawn_remote_player(
     let position = Vec3::from(player_state.position);
     let rotation = Quat::from_array(player_state.rotation);
 
-    let (model_path, model_scale) = match player_state.plane_type {
-        PlaneType::Light => ("low-poly_airplane/scene.gltf#Scene0", 0.2),
-        PlaneType::Jet => ("f16_low_poly/scene.gltf#Scene0", 3.0),
+    let (model_path, model_scale) = match player_state.plane_type { 
+        PlaneType::Light => ("low-poly_airplane/scene.gltf#Scene0", 0.4),
+        PlaneType::Jet => ("f16_low_poly/scene.gltf#Scene0", 30.0),
     };
 
     let display_name = if player_state.name == "Pilot" {
